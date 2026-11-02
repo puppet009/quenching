@@ -3,6 +3,7 @@ package tests
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -396,31 +397,39 @@ func TestAlertCallback(t *testing.T) {
 
 	createTestSandbox(store, 1, 100, 1, model.StatusRunning)
 
-	var alerted bool
-	var alertAnomaly *model.SandboxAnomaly
+	alerts := make(chan *model.SandboxAnomaly, 1)
 	svc.SetAlertCallback(func(_ context.Context, a *model.SandboxAnomaly) {
-		alerted = true
-		alertAnomaly = a
+		alerts <- a
 	})
 
 	// CPU 95% → 触发告警
-	svc.ReportMetrics(ctx, &model.ResourceMetrics{
+	if err := svc.ReportMetrics(ctx, &model.ResourceMetrics{
 		SessionID:     1,
 		Namespace:     "sandbox-1",
 		CPUPercent:    95,
 		MemoryPercent: 50,
 		PodCount:      3,
 		PodRunning:    3,
-	})
-
-	// 给 goroutine 一点时间
-	time.Sleep(10 * time.Millisecond)
-
-	if !alerted {
-		t.Error("应触发告警回调")
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if alertAnomaly == nil || alertAnomaly.AnomalyType != model.AnomalyHighCPU {
-		t.Error("告警类型应为 CPU 过高")
+
+	select {
+	case alertAnomaly := <-alerts:
+		if alertAnomaly == nil || alertAnomaly.AnomalyType != model.AnomalyHighCPU {
+			t.Fatal("告警类型应为 CPU 过高")
+		}
+		if alertAnomaly.Level != model.AnomalyError {
+			t.Errorf("CPU 超过严重阈值时应为 error, got %s", alertAnomaly.Level)
+		}
+		if alertAnomaly.Snapshot == nil || alertAnomaly.Snapshot.CPUPercent != 95 {
+			t.Errorf("告警应保留 CPU 95%% 的资源快照, got %+v", alertAnomaly.Snapshot)
+		}
+		if !strings.Contains(alertAnomaly.Message, "90.0%") {
+			t.Errorf("告警应包含严重阈值 90%%, got %q", alertAnomaly.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("应触发告警回调")
 	}
 }
 
