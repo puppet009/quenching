@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/macrozheng/mall",
+  "commit": "dcaa93b3150352e5044708d7211b5bed0af4509f",
+  "imported_at": "2026-10-02T09:24:57.6007779Z",
+  "method": "git archive HEAD ZIP; no nested .git; unchanged upstream files",
+  "archive_sha256": "7374d60493ad44db0a22fa9e82519d46549be83568adc87df4e6b8f630dc8a5f"
+}

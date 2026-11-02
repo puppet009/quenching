@@ -1,0 +1,322 @@
+{
+  "protocol_version": 1,
+  "entry_service": "frontend",
+  "api_service": "mall-portal",
+  "capabilities": [
+    "baseline",
+    "register",
+    "login",
+    "browse",
+    "cart",
+    "order",
+    "verify",
+    "pay"
+  ],
+  "operations": {
+    "baseline": [
+      {
+        "action": "ui",
+        "path": "/"
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/home/newProductList",
+        "query": {
+          "pageNum": 1,
+          "pageSize": 10
+        },
+        "save": {
+          "product_id": "$response.0.id"
+        },
+        "assert": {
+          "$response.0.id": {
+            "exists": true
+          }
+        }
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/product/detail/${product_id}",
+        "save": {
+          "product": "$response.product",
+          "sku": "$response.skuStockList.0"
+        },
+        "assert": {
+          "$response.skuStockList.0.stock": {
+            "gt": 0
+          }
+        }
+      }
+    ],
+    "register": [
+      {
+        "action": "generate_account"
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/sso/getAuthCode",
+        "query": {
+          "telephone": "$telephone"
+        },
+        "save": {
+          "auth_code": "$response"
+        }
+      },
+      {
+        "action": "http",
+        "method": "POST",
+        "path": "/sso/register",
+        "form": {
+          "username": "$username",
+          "password": "$password",
+          "telephone": "$telephone",
+          "authCode": "$auth_code"
+        }
+      },
+      {
+        "action": "http",
+        "method": "POST",
+        "path": "/sso/login",
+        "form": {
+          "username": "$username",
+          "password": "$password"
+        },
+        "save": {
+          "token": "$response.token",
+          "token_head": "$response.tokenHead"
+        },
+        "assert": {
+          "$response.token": {
+            "exists": true
+          }
+        }
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/sso/info",
+        "save": {
+          "account_id": "$response.id"
+        },
+        "assert": {
+          "$response.id": {
+            "exists": true
+          }
+        }
+      }
+    ],
+    "login": [
+      {
+        "action": "http",
+        "method": "POST",
+        "path": "/sso/login",
+        "form": {
+          "username": "$username",
+          "password": "$password"
+        },
+        "save": {
+          "token": "$response.token",
+          "token_head": "$response.tokenHead"
+        },
+        "assert": {
+          "$response.token": {
+            "exists": true
+          }
+        }
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/sso/info",
+        "save": {
+          "account_id": "$response.id"
+        },
+        "assert": {
+          "$response.id": {
+            "exists": true
+          }
+        }
+      }
+    ],
+    "browse": [
+      {
+        "action": "ui",
+        "path": "/"
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/home/newProductList",
+        "query": {
+          "pageNum": 1,
+          "pageSize": 10
+        },
+        "save": {
+          "product_id": "$response.0.id"
+        },
+        "assert": {
+          "$response.0.id": {
+            "exists": true
+          }
+        }
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/product/detail/${product_id}",
+        "save": {
+          "product": "$response.product",
+          "sku": "$response.skuStockList.0"
+        },
+        "assert": {
+          "$response.skuStockList.0.stock": {
+            "gt": 0
+          }
+        }
+      }
+    ],
+    "cart": [
+      {
+        "action": "http",
+        "method": "POST",
+        "path": "/cart/add",
+        "body": {
+          "productId": "$product.id",
+          "productSkuId": "$sku.id",
+          "quantity": 1,
+          "price": "$sku.price",
+          "productPic": "$product.pic",
+          "productName": "$product.name",
+          "productSubTitle": "$product.subTitle",
+          "productSkuCode": "$sku.skuCode",
+          "productCategoryId": "$product.productCategoryId",
+          "productBrand": "$product.brandName",
+          "productSn": "$product.productSn"
+        }
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/cart/list",
+        "save": {
+          "cart_id": "$response.0.id"
+        },
+        "assert": {
+          "$response.0.productId": {
+            "equals": "$product.id"
+          }
+        }
+      }
+    ],
+    "order": [
+      {
+        "action": "http",
+        "method": "POST",
+        "path": "/member/address/add",
+        "body": {
+          "name": "沙箱模拟客户",
+          "phoneNumber": "$telephone",
+          "defaultStatus": 1,
+          "postCode": "100000",
+          "province": "北京市",
+          "city": "北京市",
+          "region": "朝阳区",
+          "detailAddress": "沙箱实训地址"
+        }
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/member/address/list",
+        "save": {
+          "address_id": "$response.0.id"
+        }
+      },
+      {
+        "action": "http",
+        "method": "POST",
+        "path": "/order/generateConfirmOrder",
+        "body": [
+          "$cart_id"
+        ]
+      },
+      {
+        "action": "http",
+        "method": "POST",
+        "path": "/order/generateOrder",
+        "body": {
+          "memberReceiveAddressId": "$address_id",
+          "payType": 2,
+          "cartIds": [
+            "$cart_id"
+          ]
+        },
+        "save": {
+          "order_id": "$response.order.id",
+          "order_amount": "$response.order.payAmount"
+        }
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/order/detail/${order_id}",
+        "assert": {
+          "$response.id": {
+            "equals": "$order_id"
+          },
+          "$response.memberId": {
+            "equals": "$account_id"
+          },
+          "$response.status": {
+            "equals": 0
+          }
+        }
+      }
+    ],
+    "verify": [
+      {
+        "action": "ui",
+        "path": "/"
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/order/detail/${order_id}",
+        "assert": {
+          "$response.id": {
+            "equals": "$order_id"
+          },
+          "$response.memberId": {
+            "equals": "$account_id"
+          }
+        }
+      }
+    ],
+    "pay": [
+      {
+        "action": "sandbox_pay"
+      },
+      {
+        "action": "http",
+        "method": "GET",
+        "path": "/order/detail/${order_id}",
+        "assert": {
+          "$response.status": {
+            "equals": 1
+          },
+          "$response.memberId": {
+            "equals": "$account_id"
+          }
+        }
+      }
+    ]
+  },
+  "payment_adapter": {
+    "inspect_path": "/sandbox/payment/orders/{order_id}",
+    "callback_path": "/sandbox/payment/callback",
+    "secret_key": "sandbox-payment-key"
+  }
+}

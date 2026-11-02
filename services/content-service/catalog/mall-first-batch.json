@@ -1,0 +1,598 @@
+[
+  {
+    "project_id": 0,
+    "code": "mall-cpu-001",
+    "name": "CPU 争用导致交易响应变慢",
+    "defect_type": "resource",
+    "category": "cpu",
+    "difficulty": "easy",
+    "description": "正则规则引起 CPU 耗尽。 仅复现 CPU 争用现象；mall 没有该 WAF 正则，不能声称复现原始代码缺陷。",
+    "root_cause": "来源描述：正则规则引起 CPU 耗尽。 模板根因需通过服务器验收确认。",
+    "score_weight": 10,
+    "estimated_fix_time": 20,
+    "sort_order": 100,
+    "is_active": false,
+    "provenance": {
+      "kind": "incident",
+      "url": "https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/",
+      "title": "Cloudflare 2019-07-02 CPU 耗尽事故",
+      "summary": "正则规则引起 CPU 耗尽。",
+      "reproduction_difference": "仅复现 CPU 争用现象；mall 没有该 WAF 正则，不能声称复现原始代码缺陷。",
+      "checked_at": "2026-10-04",
+      "confidence": "first_party_postmortem"
+    },
+    "template_bindings": [
+      {
+        "executor": "pod_chaosblade",
+        "template_slug": "mall",
+        "target_workload": "mall-portal",
+        "status": "pending_validation",
+        "overrides": {},
+        "evidence": {}
+      }
+    ],
+    "trigger_config": {
+      "mode": "brain_instruction",
+      "prerequisites": [
+        "sandbox_ready",
+        "business_baseline_passed"
+      ],
+      "combination": "single_until_separately_accepted"
+    },
+    "manifestation_config": {
+      "expected": "正则规则引起 CPU 耗尽。",
+      "business_check": "记录商品浏览、注册及订单接口的失败与恢复证据；支付仍隔离",
+      "metrics_require_server_validation": true
+    },
+    "fix_config": {
+      "required_evidence": [
+        "observed",
+        "repaired",
+        "revoked",
+        "cleanup",
+        "validated_at"
+      ],
+      "must_validate_business_recovery": true,
+      "timeout_is_not_user_fix": true
+    },
+    "amplifier_config": {
+      "code": "mall-cpu-001",
+      "kind": "cpu",
+      "title": "CPU 争用导致交易响应变慢",
+      "target": {},
+      "spec": {
+        "scope": "pod",
+        "duration_sec": 60,
+        "cpu_percent": 60
+      },
+      "trigger": {
+        "type": "delay",
+        "delay_seconds": 30
+      },
+      "recovery": [
+        {
+          "metric": "cpu_usage",
+          "service": "mall-portal",
+          "op": "lte",
+          "value": 0.5
+        }
+      ],
+      "auto_revoke": true
+    },
+    "freeze_rules": {
+      "sandbox_only": true,
+      "max_duration_sec": 120,
+      "combination_requires_new_acceptance": true
+    }
+  },
+  {
+    "project_id": 0,
+    "code": "mall-memory-001",
+    "name": "Redis 内存压力与业务写入失败",
+    "defect_type": "resource",
+    "category": "memory",
+    "difficulty": "medium",
+    "description": "队列积压使 Redis 达到内存上限。 仅以 Pod 内存负载复现容量压力；不是 Redis 数据增长，也不等同 JVM 内存泄漏或原事故根因。",
+    "root_cause": "来源描述：队列积压使 Redis 达到内存上限。 模板根因需通过服务器验收确认。",
+    "score_weight": 10,
+    "estimated_fix_time": 20,
+    "sort_order": 101,
+    "is_active": false,
+    "provenance": {
+      "kind": "incident",
+      "url": "https://slack.engineering/scaling-slacks-job-queue/",
+      "title": "Slack 任务队列生产事故",
+      "summary": "队列积压使 Redis 达到内存上限。",
+      "reproduction_difference": "仅以 Pod 内存负载复现容量压力；不是 Redis 数据增长，也不等同 JVM 内存泄漏或原事故根因。",
+      "checked_at": "2026-10-04",
+      "confidence": "first_party_postmortem"
+    },
+    "template_bindings": [
+      {
+        "executor": "pod_chaosblade",
+        "template_slug": "mall",
+        "target_workload": "redis",
+        "status": "pending_validation",
+        "overrides": {},
+        "evidence": {}
+      }
+    ],
+    "trigger_config": {
+      "mode": "brain_instruction",
+      "prerequisites": [
+        "sandbox_ready",
+        "business_baseline_passed"
+      ],
+      "combination": "single_until_separately_accepted"
+    },
+    "manifestation_config": {
+      "expected": "队列积压使 Redis 达到内存上限。",
+      "business_check": "记录商品浏览、注册及订单接口的失败与恢复证据；支付仍隔离",
+      "metrics_require_server_validation": true
+    },
+    "fix_config": {
+      "required_evidence": [
+        "observed",
+        "repaired",
+        "revoked",
+        "cleanup",
+        "validated_at"
+      ],
+      "must_validate_business_recovery": true,
+      "timeout_is_not_user_fix": true
+    },
+    "amplifier_config": {
+      "code": "mall-memory-001",
+      "kind": "memory",
+      "title": "Redis 内存压力与业务写入失败",
+      "target": {},
+      "spec": {
+        "scope": "pod",
+        "duration_sec": 60,
+        "mem_percent": 50
+      },
+      "trigger": {
+        "type": "delay",
+        "delay_seconds": 30
+      },
+      "recovery": [
+        {
+          "metric": "mem_usage",
+          "service": "redis",
+          "op": "lte",
+          "value": 268435456
+        }
+      ],
+      "auto_revoke": true
+    },
+    "freeze_rules": {
+      "sandbox_only": true,
+      "max_duration_sec": 120,
+      "combination_requires_new_acceptance": true
+    }
+  },
+  {
+    "project_id": 0,
+    "code": "mall-network-001",
+    "name": "依赖网络延迟导致交易超时",
+    "defect_type": "config",
+    "category": "network",
+    "difficulty": "medium",
+    "description": "网络中断触发数据库故障转移和长时间服务异常。 mall 为单数据库；只复现 Pod 网络退化，不复现跨机房故障转移。",
+    "root_cause": "来源描述：网络中断触发数据库故障转移和长时间服务异常。 模板根因需通过服务器验收确认。",
+    "score_weight": 10,
+    "estimated_fix_time": 20,
+    "sort_order": 102,
+    "is_active": false,
+    "provenance": {
+      "kind": "incident",
+      "url": "https://github.blog/news-insights/company-news/oct21-post-incident-analysis/",
+      "title": "GitHub 2018-10-21 网络分区事故",
+      "summary": "网络中断触发数据库故障转移和长时间服务异常。",
+      "reproduction_difference": "mall 为单数据库；只复现 Pod 网络退化，不复现跨机房故障转移。",
+      "checked_at": "2026-10-04",
+      "confidence": "first_party_postmortem"
+    },
+    "template_bindings": [
+      {
+        "executor": "pod_chaosblade",
+        "template_slug": "mall",
+        "target_workload": "mall-portal",
+        "status": "pending_validation",
+        "overrides": {},
+        "evidence": {}
+      }
+    ],
+    "trigger_config": {
+      "mode": "brain_instruction",
+      "prerequisites": [
+        "sandbox_ready",
+        "business_baseline_passed"
+      ],
+      "combination": "single_until_separately_accepted"
+    },
+    "manifestation_config": {
+      "expected": "网络中断触发数据库故障转移和长时间服务异常。",
+      "business_check": "记录商品浏览、注册及订单接口的失败与恢复证据；支付仍隔离",
+      "metrics_require_server_validation": true
+    },
+    "fix_config": {
+      "required_evidence": [
+        "observed",
+        "repaired",
+        "revoked",
+        "cleanup",
+        "validated_at"
+      ],
+      "must_validate_business_recovery": true,
+      "timeout_is_not_user_fix": true
+    },
+    "amplifier_config": {
+      "code": "mall-network-001",
+      "kind": "network_delay",
+      "title": "依赖网络延迟导致交易超时",
+      "target": {},
+      "spec": {
+        "scope": "pod",
+        "duration_sec": 60,
+        "delay_millis": 800
+      },
+      "trigger": {
+        "type": "delay",
+        "delay_seconds": 30
+      },
+      "recovery": [
+        {
+          "metric": "error_rate",
+          "service": "mall-portal",
+          "op": "lte",
+          "value": 0.01
+        }
+      ],
+      "auto_revoke": true
+    },
+    "freeze_rules": {
+      "sandbox_only": true,
+      "max_duration_sec": 120,
+      "combination_requires_new_acceptance": true
+    }
+  },
+  {
+    "project_id": 0,
+    "code": "mall-database-001",
+    "name": "数据库失联与连接获取超时",
+    "defect_type": "config",
+    "category": "database",
+    "difficulty": "medium",
+    "description": "MySQL 节点失效后报告连接池获取连接超时。 对 mall 单 MySQL Pod 注入丢包；不宣称当前 Druid 存在同一集群连接池缺陷。",
+    "root_cause": "来源描述：MySQL 节点失效后报告连接池获取连接超时。 模板根因需通过服务器验收确认。",
+    "score_weight": 10,
+    "estimated_fix_time": 20,
+    "sort_order": 103,
+    "is_active": false,
+    "provenance": {
+      "kind": "issue",
+      "url": "https://github.com/alibaba/druid/issues/4078",
+      "title": "Druid #4078 用户报告",
+      "summary": "MySQL 节点失效后报告连接池获取连接超时。",
+      "reproduction_difference": "对 mall 单 MySQL Pod 注入丢包；不宣称当前 Druid 存在同一集群连接池缺陷。",
+      "checked_at": "2026-10-04",
+      "confidence": "user_report"
+    },
+    "template_bindings": [
+      {
+        "executor": "pod_chaosblade",
+        "template_slug": "mall",
+        "target_workload": "mysql",
+        "status": "pending_validation",
+        "overrides": {},
+        "evidence": {}
+      }
+    ],
+    "trigger_config": {
+      "mode": "brain_instruction",
+      "prerequisites": [
+        "sandbox_ready",
+        "business_baseline_passed"
+      ],
+      "combination": "single_until_separately_accepted"
+    },
+    "manifestation_config": {
+      "expected": "MySQL 节点失效后报告连接池获取连接超时。",
+      "business_check": "记录商品浏览、注册及订单接口的失败与恢复证据；支付仍隔离",
+      "metrics_require_server_validation": true
+    },
+    "fix_config": {
+      "required_evidence": [
+        "observed",
+        "repaired",
+        "revoked",
+        "cleanup",
+        "validated_at"
+      ],
+      "must_validate_business_recovery": true,
+      "timeout_is_not_user_fix": true
+    },
+    "amplifier_config": {
+      "code": "mall-database-001",
+      "kind": "network_loss",
+      "title": "数据库失联与连接获取超时",
+      "target": {},
+      "spec": {
+        "scope": "pod",
+        "duration_sec": 60,
+        "loss_percent": 100
+      },
+      "trigger": {
+        "type": "delay",
+        "delay_seconds": 30
+      },
+      "recovery": [
+        {
+          "metric": "error_rate",
+          "service": "mall-portal",
+          "op": "lte",
+          "value": 0.01
+        }
+      ],
+      "auto_revoke": true
+    },
+    "freeze_rules": {
+      "sandbox_only": true,
+      "max_duration_sec": 120,
+      "combination_requires_new_acceptance": true
+    }
+  },
+  {
+    "project_id": 0,
+    "code": "mall-cache-001",
+    "name": "缓存容量上限导致写入拒绝",
+    "defect_type": "config",
+    "category": "cache",
+    "difficulty": "medium",
+    "description": "Redis 达到 maxmemory 后拒绝新增工作。 计划使用受限键前缀和可恢复 maxmemory 配置，尚未实现适配；不能把网络丢包当缓存容量问题。",
+    "root_cause": "来源描述：Redis 达到 maxmemory 后拒绝新增工作。 模板根因需通过服务器验收确认。",
+    "score_weight": 10,
+    "estimated_fix_time": 20,
+    "sort_order": 104,
+    "is_active": false,
+    "provenance": {
+      "kind": "incident",
+      "url": "https://slack.engineering/scaling-slacks-job-queue/",
+      "title": "Slack 任务队列生产事故",
+      "summary": "Redis 达到 maxmemory 后拒绝新增工作。",
+      "reproduction_difference": "计划使用受限键前缀和可恢复 maxmemory 配置，尚未实现适配；不能把网络丢包当缓存容量问题。",
+      "checked_at": "2026-10-04",
+      "confidence": "first_party_postmortem"
+    },
+    "template_bindings": [
+      {
+        "executor": "pending_adapter",
+        "template_slug": "mall",
+        "target_workload": "redis",
+        "status": "draft",
+        "overrides": {},
+        "evidence": {}
+      }
+    ],
+    "trigger_config": {
+      "mode": "brain_instruction",
+      "prerequisites": [
+        "sandbox_ready",
+        "business_baseline_passed"
+      ],
+      "combination": "single_until_separately_accepted"
+    },
+    "manifestation_config": {
+      "expected": "Redis 达到 maxmemory 后拒绝新增工作。",
+      "business_check": "记录商品浏览、注册及订单接口的失败与恢复证据；支付仍隔离",
+      "metrics_require_server_validation": true
+    },
+    "fix_config": {
+      "required_evidence": [
+        "observed",
+        "repaired",
+        "revoked",
+        "cleanup",
+        "validated_at"
+      ],
+      "must_validate_business_recovery": true,
+      "timeout_is_not_user_fix": true
+    },
+    "amplifier_config": {},
+    "freeze_rules": {
+      "sandbox_only": true,
+      "max_duration_sec": 120,
+      "combination_requires_new_acceptance": true
+    }
+  },
+  {
+    "project_id": 0,
+    "code": "mall-mq-001",
+    "name": "消费者退化与订单消息积压",
+    "defect_type": "architecture",
+    "category": "mq",
+    "difficulty": "medium",
+    "description": "数据库争用拖慢消费者并造成队列持续积压。 将同类排队容量问题映射到 mall RabbitMQ；不是 Slack Redis 队列的根因复现，订单业务验收和消费者适配未完成。",
+    "root_cause": "来源描述：数据库争用拖慢消费者并造成队列持续积压。 模板根因需通过服务器验收确认。",
+    "score_weight": 10,
+    "estimated_fix_time": 20,
+    "sort_order": 105,
+    "is_active": false,
+    "provenance": {
+      "kind": "incident",
+      "url": "https://slack.engineering/scaling-slacks-job-queue/",
+      "title": "Slack 任务队列生产事故",
+      "summary": "数据库争用拖慢消费者并造成队列持续积压。",
+      "reproduction_difference": "将同类排队容量问题映射到 mall RabbitMQ；不是 Slack Redis 队列的根因复现，订单业务验收和消费者适配未完成。",
+      "checked_at": "2026-10-04",
+      "confidence": "first_party_postmortem"
+    },
+    "template_bindings": [
+      {
+        "executor": "pending_adapter",
+        "template_slug": "mall",
+        "target_workload": "rabbitmq",
+        "status": "draft",
+        "overrides": {},
+        "evidence": {}
+      }
+    ],
+    "trigger_config": {
+      "mode": "brain_instruction",
+      "prerequisites": [
+        "sandbox_ready",
+        "business_baseline_passed"
+      ],
+      "combination": "single_until_separately_accepted"
+    },
+    "manifestation_config": {
+      "expected": "数据库争用拖慢消费者并造成队列持续积压。",
+      "business_check": "记录商品浏览、注册及订单接口的失败与恢复证据；支付仍隔离",
+      "metrics_require_server_validation": true
+    },
+    "fix_config": {
+      "required_evidence": [
+        "observed",
+        "repaired",
+        "revoked",
+        "cleanup",
+        "validated_at"
+      ],
+      "must_validate_business_recovery": true,
+      "timeout_is_not_user_fix": true
+    },
+    "amplifier_config": {},
+    "freeze_rules": {
+      "sandbox_only": true,
+      "max_duration_sec": 120,
+      "combination_requires_new_acceptance": true
+    }
+  },
+  {
+    "project_id": 0,
+    "code": "mall-disk-001",
+    "name": "磁盘水位告警阻塞消息发布",
+    "defect_type": "resource",
+    "category": "disk",
+    "difficulty": "medium",
+    "description": "磁盘告警下发布连接处于 blocked 状态。 计划暂调沙箱 RabbitMQ 水位并恢复原值；不填宿主机磁盘，不承诺复现历史残留连接细节，适配未完成。",
+    "root_cause": "来源描述：磁盘告警下发布连接处于 blocked 状态。 模板根因需通过服务器验收确认。",
+    "score_weight": 10,
+    "estimated_fix_time": 20,
+    "sort_order": 106,
+    "is_active": false,
+    "provenance": {
+      "kind": "issue",
+      "url": "https://github.com/rabbitmq/rabbitmq-server/discussions/4627",
+      "title": "RabbitMQ #4627 真实复现与维护者讨论",
+      "summary": "磁盘告警下发布连接处于 blocked 状态。",
+      "reproduction_difference": "计划暂调沙箱 RabbitMQ 水位并恢复原值；不填宿主机磁盘，不承诺复现历史残留连接细节，适配未完成。",
+      "checked_at": "2026-10-04",
+      "confidence": "user_report"
+    },
+    "template_bindings": [
+      {
+        "executor": "pending_adapter",
+        "template_slug": "mall",
+        "target_workload": "rabbitmq",
+        "status": "draft",
+        "overrides": {},
+        "evidence": {}
+      }
+    ],
+    "trigger_config": {
+      "mode": "brain_instruction",
+      "prerequisites": [
+        "sandbox_ready",
+        "business_baseline_passed"
+      ],
+      "combination": "single_until_separately_accepted"
+    },
+    "manifestation_config": {
+      "expected": "磁盘告警下发布连接处于 blocked 状态。",
+      "business_check": "记录商品浏览、注册及订单接口的失败与恢复证据；支付仍隔离",
+      "metrics_require_server_validation": true
+    },
+    "fix_config": {
+      "required_evidence": [
+        "observed",
+        "repaired",
+        "revoked",
+        "cleanup",
+        "validated_at"
+      ],
+      "must_validate_business_recovery": true,
+      "timeout_is_not_user_fix": true
+    },
+    "amplifier_config": {},
+    "freeze_rules": {
+      "sandbox_only": true,
+      "max_duration_sec": 120,
+      "combination_requires_new_acceptance": true
+    }
+  },
+  {
+    "project_id": 0,
+    "code": "mall-threadpool-001",
+    "name": "请求资源未释放导致线程池耗尽",
+    "defect_type": "code",
+    "category": "threadpool",
+    "difficulty": "medium",
+    "description": "客户端断开后资源未释放，用户报告 Tomcat 无响应。 该报告未确认且已关闭为 not planned；mall 没有 MCP。当前仅为现象训练候选，必须另做可撤销代码覆盖和请求适配，不宣称存在同一漏洞。",
+    "root_cause": "来源描述：客户端断开后资源未释放，用户报告 Tomcat 无响应。 模板根因需通过服务器验收确认。",
+    "score_weight": 10,
+    "estimated_fix_time": 20,
+    "sort_order": 107,
+    "is_active": false,
+    "provenance": {
+      "kind": "issue",
+      "url": "https://github.com/spring-projects/spring-ai/issues/6384",
+      "title": "Spring AI #6384 用户报告",
+      "summary": "客户端断开后资源未释放，用户报告 Tomcat 无响应。",
+      "reproduction_difference": "该报告未确认且已关闭为 not planned；mall 没有 MCP。当前仅为现象训练候选，必须另做可撤销代码覆盖和请求适配，不宣称存在同一漏洞。",
+      "checked_at": "2026-10-04",
+      "confidence": "user_report"
+    },
+    "template_bindings": [
+      {
+        "executor": "pending_adapter",
+        "template_slug": "mall",
+        "target_workload": "mall-portal",
+        "status": "draft",
+        "overrides": {},
+        "evidence": {}
+      }
+    ],
+    "trigger_config": {
+      "mode": "brain_instruction",
+      "prerequisites": [
+        "sandbox_ready",
+        "business_baseline_passed"
+      ],
+      "combination": "single_until_separately_accepted"
+    },
+    "manifestation_config": {
+      "expected": "客户端断开后资源未释放，用户报告 Tomcat 无响应。",
+      "business_check": "记录商品浏览、注册及订单接口的失败与恢复证据；支付仍隔离",
+      "metrics_require_server_validation": true
+    },
+    "fix_config": {
+      "required_evidence": [
+        "observed",
+        "repaired",
+        "revoked",
+        "cleanup",
+        "validated_at"
+      ],
+      "must_validate_business_recovery": true,
+      "timeout_is_not_user_fix": true
+    },
+    "amplifier_config": {},
+    "freeze_rules": {
+      "sandbox_only": true,
+      "max_duration_sec": 120,
+      "combination_requires_new_acceptance": true
+    }
+  }
+]

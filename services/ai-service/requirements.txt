@@ -1,0 +1,15 @@
+# ai-service 锁定依赖；升级时重新运行测试和依赖安全审计。
+fastapi==0.139.2
+uvicorn[standard]==0.34.2
+pydantic==2.11.9
+pydantic-settings==2.10.1
+httpx==0.28.1
+tenacity==9.1.2
+python-dotenv==1.2.2
+# 结构化日志
+structlog==25.3.0
+# gRPC：供 Go 服务调用 AI 能力（生成代码用 grpcio-tools，仅开发/重新生成时需要）
+grpcio==1.84.0
+grpcio-reflection==1.84.0
+protobuf==7.36.1
+grpcio-tools==1.84.0

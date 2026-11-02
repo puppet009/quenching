@@ -1,0 +1,99 @@
+# Infrastructure stdout/stderr only. Backend services already own rotating files.
+data_dir: /var/log/quenching/.collector/${VECTOR_SELF_NODE_NAME}
+sources:
+  containers:
+    type: kubernetes_logs
+    self_node_name: ${VECTOR_SELF_NODE_NAME}
+    extra_field_selector: metadata.namespace=${POD_NAMESPACE}
+    auto_partial_merge: true
+    max_line_bytes: 262144
+    include_paths_glob_patterns:
+      - /var/log/pods/${POD_NAMESPACE}_*/web/*.log
+      - /var/log/pods/${POD_NAMESPACE}_*/admin/*.log
+      - /var/log/pods/${POD_NAMESPACE}_*/postgresql/*.log
+      - /var/log/pods/${POD_NAMESPACE}_*/redis/*.log
+      - /var/log/pods/${POD_NAMESPACE}_*/rabbitmq/*.log
+      - /var/log/pods/${POD_NAMESPACE}_*/prometheus/*.log
+transforms:
+  eligible:
+    type: filter
+    inputs: [containers]
+    condition: '.kubernetes.pod_namespace == "${POD_NAMESPACE}" && includes(["web", "admin", "postgresql", "redis", "rabbitmq", "prometheus"], .kubernetes.container_name)'
+  normalize:
+    type: remap
+    inputs: [eligible]
+    source: |
+      .service = string!(.kubernetes.container_name)
+      if .service == "prometheus" { .service = "prometheus-server" }
+      if includes(["web", "admin"], .service) {
+        # NGINX stderr includes the raw request/upstream/referrer even when the
+        # access log records only the path. Strip queries before file output.
+        message = string!(.message)
+        message = replace(message, r'\?[^\s"<>]*', "?[REDACTED]")
+        message = replace(message, r'(?i)bearer\s+[a-z0-9._~+/-]+=*', "Bearer [REDACTED]")
+        .message = replace(message, r'(?i)(?:authorization|access[_-]?token|token|password|passwd|api[_-]?key|secret)\s*[:=]\s*[^,\s"]+', "[REDACTED]")
+      }
+      .pod = string!(.kubernetes.pod_name)
+      at = timestamp(.timestamp) ?? now()
+      .ts = format_timestamp!(at, format: "%+", timezone: "Asia/Shanghai")
+sinks:
+  files:
+    type: file
+    inputs: [normalize]
+    base_dir: /var/log/quenching
+    path: /var/log/quenching/{{ service }}/%F/{{ service }}-{{ pod }}-%H.log
+    timezone: Asia/Shanghai
+    idle_timeout_secs: 30
+    encoding:
+      codec: json
+    buffer:
+      type: memory
+      max_events: 1000
+      when_full: block
+tests:
+  - name: NGINX upstream failures preserve the cause without URL credentials
+    inputs:
+      - insert_at: eligible
+        type: vrl
+        source: |
+          .kubernetes = {"pod_namespace": "${POD_NAMESPACE}", "container_name": "web", "pod_name": "web-test"}
+          .message = "connect() failed (111: Connection refused), request: \"GET /api/v1/sandboxes/5/exec?cols=100&token=secret-jwt HTTP/1.1\", upstream: \"http://api-gateway:8080/api/v1/sandboxes/5/exec?token=secret-jwt\", referrer: \"https://example.test/training?access_token=secret-oauth\""
+    outputs:
+      - extract_from: normalize
+        conditions:
+          - type: vrl
+            source: |
+              assert!(contains(string!(.message), "Connection refused"))
+              assert!(contains(string!(.message), "/api/v1/sandboxes/5/exec"))
+              assert!(!contains(string!(.message), "secret-"))
+              assert!(!contains(string!(.message), "cols=100"))
+  - name: Beijing infrastructure timestamp and stable service name
+    inputs:
+      - insert_at: eligible
+        type: vrl
+        source: |
+          .kubernetes = {"pod_namespace": "${POD_NAMESPACE}", "container_name": "prometheus", "pod_name": "prometheus-test"}
+          .timestamp = t'2026-10-18T16:02:03Z'
+          .message = "test"
+    outputs:
+      - extract_from: normalize
+        conditions:
+          - type: vrl
+            source: |
+              assert_eq!(.service, "prometheus-server")
+              assert_eq!(.pod, "prometheus-test")
+              assert_eq!(.ts, "2026-10-19T00:02:03+08:00")
+  - name: Existing backend file logs are not duplicated
+    inputs:
+      - insert_at: eligible
+        type: log
+        log_fields:
+          kubernetes: {pod_namespace: "${POD_NAMESPACE}", container_name: api-gateway}
+    no_outputs_from: [eligible, normalize]
+  - name: Sandbox namespace is excluded
+    inputs:
+      - insert_at: eligible
+        type: log
+        log_fields:
+          kubernetes: {pod_namespace: sandbox-5, container_name: web}
+    no_outputs_from: [eligible, normalize]

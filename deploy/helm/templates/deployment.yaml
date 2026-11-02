@@ -1,0 +1,193 @@
+{{- $root := . -}}
+{{- /* g7：ws-gateway 已并入 api-gateway */ -}}
+{{- range $name := list "api-gateway" "content-service" "user-service" "training-service" "review-service" "fault-engine" "sandbox-service" "ai-service" }}
+{{- $s := index $root.Values.services $name }}
+{{- if $s.enabled }}
+{{- $kind := include "quenching.svcKind" $name | trimAll "\n " }}
+{{- $logOn := eq (include "quenching.logEnabled" $root) "true" }}
+{{- $logDir := include "quenching.logDir" $root }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "quenching.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  replicas: {{ $s.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "quenching.name" $root }}
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+      app.kubernetes.io/component: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "quenching.name" $root }}
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+        app.kubernetes.io/component: {{ $name }}
+      {{- if eq $kind "go-yaml" }}
+      # ConfigMap 内容变化时强制触发滚动重启，避免 Pod 挂着旧配置运行
+      # （镜像 tag 不变时 Deployment 模板本身无 diff，不会自动重启）。
+      annotations:
+        checksum/config: {{ include "quenching.renderConfig" (list $root $name) | sha256sum }}
+        # platform-secret 变更同样强制重启：否则 user-service 用旧密钥签发、
+        # api-gateway 用新密钥验签，合法 token 会被误判为“登录已失效”。
+        checksum/secret: {{ include "quenching.platformSecretMaterial" $root | sha256sum }}
+      {{- else }}
+      annotations:
+        checksum/secret: {{ include "quenching.platformSecretMaterial" $root | sha256sum }}
+      {{- end }}
+    spec:
+      priorityClassName: quenching-platform
+      {{- with $root.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if eq $name "sandbox-service" }}
+      # 真实沙箱需 InCluster 操作 Namespace/Quota/NetworkPolicy 并 exec helm CLI
+      serviceAccountName: sandbox-service
+      {{- else if and (eq $name "fault-engine") $root.Values.faultExecution.enabled }}
+      serviceAccountName: fault-engine
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "quenching.image" (list $root $name) }}
+          imagePullPolicy: {{ $root.Values.global.imagePullPolicy }}
+          {{- if eq $kind "python" }}
+          ports:
+            - { name: http, containerPort: {{ $s.httpPort }}, protocol: TCP }
+            - { name: grpc, containerPort: {{ $s.grpcPort }}, protocol: TCP }
+          env:
+            - { name: PORT, value: "{{ $s.httpPort }}" }
+            - { name: GRPC_PORT, value: "{{ $s.grpcPort }}" }
+            - { name: APP_ENV, value: "production" }
+            - { name: INTERNAL_TOKEN, valueFrom: { secretKeyRef: { name: platform-secret, key: internal-token } } }
+            - { name: LLM_MOCK, value: {{ $root.Values.ai.llmMock | quote }} }
+            - { name: LLM_PROVIDER, value: {{ $root.Values.ai.llmProvider | quote }} }
+            - { name: LLM_BASE_URL, value: {{ $root.Values.ai.llmBaseUrl | quote }} }
+            - { name: LLM_MODEL, value: {{ $root.Values.ai.llmModel | quote }} }
+            - { name: LLM_MEMORY_TIMEOUT, value: {{ $root.Values.ai.llmMemoryTimeout | quote }} }
+            - { name: LLM_TIMEOUT, value: {{ $root.Values.ai.llmTimeout | quote }} }
+            - { name: LLM_MAX_RETRIES, value: {{ $root.Values.ai.llmMaxRetries | quote }} }
+            - { name: LLM_API_KEY, valueFrom: { secretKeyRef: { name: ai-service-secret, key: llm-api-key, optional: true } } }
+            {{- include "quenching.logEnv" $root | nindent 12 }}
+          volumeMounts:
+            {{- if $logOn }}
+            - name: logs
+              mountPath: {{ $logDir }}
+            {{- end }}
+          readinessProbe:
+            tcpSocket: { port: grpc }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          {{- else }}
+          ports:
+            - { name: http, containerPort: {{ $s.port }}, protocol: TCP }
+          {{- if eq $kind "go-env" }}
+          envFrom:
+            - configMapRef: { name: {{ $name }}-env }
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secret
+                  key: jwt-secret
+            {{- if eq $name "api-gateway" }}
+            {{- range $i, $r := mustFromJson (include "quenching.gatewayRoutes" $root) }}
+            - name: ROUTE_{{ $i }}
+              value: {{ printf "%s|http://%s:%v|%t" $r.prefix $r.svc $r.port $r.auth | quote }}
+            {{- end }}
+            # g7：/api/v1/events 内部事件发布鉴权 key，与 training 下发的 ws_gateway_api_key 同源
+            - name: INTERNAL_TOKEN
+              value: {{ $root.Values.global.internalToken | quote }}
+            - name: WS_INTERNAL_API_KEY
+              value: {{ $root.Values.observability.wsGatewayApiKey | quote }}
+            {{- include "quenching.logEnv" $root | nindent 12 }}
+          {{- if $logOn }}
+          volumeMounts:
+            - name: logs
+              mountPath: {{ $logDir }}
+          {{- end }}
+            {{- end }}
+          {{- else }}
+          env:
+            {{- if eq $name "sandbox-service" }}
+            - name: AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secret
+                  key: jwt-secret
+            {{- end }}
+            - name: DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secret
+                  key: db-dsn
+            # JWT 在 api-gateway 校验、在 user-service 签发，必须共用同一密钥，
+            # 否则网关验签失败，合法 token 被误判为“登录已失效”。
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secret
+                  key: jwt-secret
+            {{- include "quenching.logEnv" $root | nindent 12 }}
+            {{- if eq $name "review-service" }}
+            - name: WORKER_TASK_TIMEOUT
+              value: {{ $s.workerTaskTimeout | default "340s" | quote }}
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: platform-secret
+                  key: amqp-url
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/configs
+            {{- if $logOn }}
+            - name: logs
+              mountPath: {{ $logDir }}
+            {{- end }}
+          {{- end }}
+          readinessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 8
+            periodSeconds: 20
+      {{- /* volumes 必须放在 python/else 之外（pod 级），否则 python 的 ai-service
+             有 logs 挂载却没有对应 volume。默认值见各 nil 安全 helper。 */}}
+      {{- /* 闭合 if eq $kind "python" / else（env 与探针分支），修复 T2-33 起缺失的 end */ -}}
+      {{- end }}
+          {{- with $s.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- if or (eq $kind "go-yaml") $logOn }}
+      volumes:
+        {{- if eq $kind "go-yaml" }}
+        - name: config
+          configMap:
+            name: {{ $name }}-config
+        {{- end }}
+        {{- if $logOn }}
+        - name: logs
+          {{- if include "quenching.logHostPath" $root }}
+          hostPath:
+            path: {{ include "quenching.logHostPath" $root | quote }}
+            type: Directory
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "quenching.name" $root }}-logs
+          {{- end }}
+        {{- end }}
+      {{- end }}
+{{- end }}
+{{- end }}

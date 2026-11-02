@@ -1,0 +1,33 @@
+# ai-service Python 工程元数据与工具配置（README §4.2 要求）。
+# 依赖仍以 requirements.txt（含锁版本）为准，Dockerfile 用 pip install -r 安装；
+# 本文件目前只承载工程元数据与 ruff 门禁配置，不改变既有安装方式。
+[project]
+name = "quenching-ai-service"
+version = "0.1.0a1"
+description = "淬火平台 AI 服务：复盘报告生成、训练助教、坑点话术与协作评估"
+requires-python = ">=3.12"
+
+[tool.black]
+required-version = "24.10.0"
+target-version = ["py312"]
+# Protocol-generated stubs are regenerated, never manually reformatted.
+force-exclude = "/app/grpc_gen/"
+
+[tool.ruff]
+# 显式写出门禁参数，与 Makefile 中 `ruff check .` 的历史默认行为保持一致，
+# 避免不同 ruff 版本默认值漂移导致 CI 结果变化。
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+# 默认规则集（E4/E7/E9/F）等价于裸跑 ruff check，不额外收紧。
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# 生成代码不参与人工风格门禁。
+"app/grpc_gen/**" = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+# 服务目录即导入根：测试以 `from app...` 导入，与容器内运行方式一致。
+testpaths = ["tests"]
+addopts = "-q"

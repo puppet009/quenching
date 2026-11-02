@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # 平台服务自身指标（开发期占位）
+  - job_name: platform-services
+    static_configs:
+      - targets: ["host.docker.internal:8082"]
+  # 沙箱内服务指标由沙箱管理器动态注册，MVP 阶段在此追加

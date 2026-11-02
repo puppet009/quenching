@@ -1,0 +1,36 @@
+{{- if .Values.persistence.enabled }}
+{{- range $name, $service := .Values.services }}
+{{- if $service.storage }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}-data
+  namespace: {{ $.Release.Namespace }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if $.Values.persistence.storageClass }}
+  storageClassName: {{ $.Values.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $service.storage }}
+{{- end }}
+{{- if $service.workspace }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}-workspace
+  namespace: {{ $.Release.Namespace }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if $.Values.persistence.storageClass }}
+  storageClassName: {{ $.Values.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $service.workspace.storage }}
+{{- end }}
+{{- end }}
+{{- end }}

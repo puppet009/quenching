@@ -1,0 +1,37 @@
+openapi: 3.0.3
+info:
+  title: Training brain status
+  version: 1.0.0
+paths:
+  /api/v1/training/sessions/{id}/brain:
+    get:
+      summary: Read authenticated owner's public training status
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer, format: int64}
+      responses:
+        '200':
+          description: Public status only; no director parameters or future fault details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: {type: integer}
+                  data: {$ref: '#/components/schemas/BrainSessionStatus'}
+        '401': {description: Authentication required}
+        '404': {description: Session not owned or brain not enabled}
+components:
+  schemas:
+    BrainSessionStatus:
+      type: object
+      required: [phase, current_challenge, status, reason, cleanup_status, ability_observed]
+      properties:
+        phase: {type: string}
+        current_challenge: {type: integer}
+        status: {type: string}
+        reason: {type: string}
+        cleanup_status: {type: string}
+        ability_observed: {type: boolean}

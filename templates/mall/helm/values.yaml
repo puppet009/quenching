@@ -1,0 +1,88 @@
+global:
+  image:
+    registry: ""
+    repository: ""
+    tag: mall-0.2.0
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+
+# Empty credentials are generated once on install and reused on upgrade.
+credentials:
+  mysqlPassword: ""
+  mysqlRootPassword: ""
+  rabbitPassword: ""
+  jwtSecret: ""
+
+persistence:
+  enabled: true
+  storageClass: "" # Use the cluster default; its reclaimPolicy must be Delete.
+
+initImage:
+  repository: busybox
+  tag: "1.37.0"
+
+services:
+  frontend:
+    image:
+      repository: quenching/mall-frontend
+    port: 80
+    workspace: {storage: 1Gi}
+    terminal:
+      workingDir: /workspace/mall-app-web
+      deploymentDir: /usr/share/nginx/html
+      configDir: /etc/nginx/conf.d
+    resources:
+      # Reserve build memory in admission, not only the idle nginx footprint.
+      requests: {cpu: 100m, memory: 1Gi}
+      limits: {cpu: 500m, memory: 1Gi}
+  mall-portal:
+    image:
+      repository: quenching/mall-portal
+    port: 8085
+    workspace: {storage: 2Gi}
+    terminal:
+      workingDir: /workspace/mall
+      deploymentDir: /app
+      configDir: /app/config
+    resources:
+      requests: {cpu: 100m, memory: 768Mi}
+      limits: {cpu: 700m, memory: 768Mi}
+  mysql:
+    image:
+      repository: quenching/mall-mysql
+    port: 3306
+    storage: 1Gi
+    terminal: {workingDir: /var/lib/mysql}
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: 400m, memory: 512Mi}
+  redis:
+    image:
+      repository: redis
+      tag: 7.4.2-alpine
+    port: 6379
+    storage: 128Mi
+    terminal: {workingDir: /data}
+    resources:
+      requests: {cpu: 25m, memory: 32Mi}
+      limits: {cpu: 100m, memory: 128Mi}
+  rabbitmq:
+    image:
+      repository: rabbitmq
+      tag: 3.13.7-alpine
+    port: 5672
+    storage: 256Mi
+    terminal: {workingDir: /var/lib/rabbitmq}
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {cpu: 300m, memory: 512Mi}
+  mongo:
+    image:
+      repository: mongo
+      tag: "7.0.16"
+    port: 27017
+    storage: 1Gi
+    terminal: {workingDir: /data/db}
+    resources:
+      requests: {cpu: 50m, memory: 256Mi}
+      limits: {cpu: 300m, memory: 768Mi}

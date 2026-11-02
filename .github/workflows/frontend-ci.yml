@@ -1,0 +1,104 @@
+name: Frontend CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22.20.0'
+  PNPM_VERSION: '9.15.9'
+
+jobs:
+  detect-changes:
+    name: Detect changed apps
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.detect.outputs.apps }}
+      should_check: ${{ steps.detect.outputs.should_check }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: detect
+        run: python scripts/ci/detect_changes.py --kind frontend
+
+  app-checks:
+    name: '${{ matrix.app }}: lint, types, tests, build'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should_check == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.detect-changes.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      # The pnpm store cache is an optimization. Each fresh checkout installs
+      # the complete workspace so cache misses cannot skip dependencies.
+      - name: Install locked workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: ESLint
+        run: pnpm --filter @quenching/${{ matrix.app }} lint
+      - name: TypeScript
+        run: pnpm --filter @quenching/${{ matrix.app }} exec tsc -b
+      - name: App regression tests
+        run: pnpm --filter @quenching/${{ matrix.app }} test
+      - name: Build
+        run: pnpm --filter @quenching/${{ matrix.app }} build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.app }}
+          path: apps/${{ matrix.app }}/dist
+          if-no-files-found: error
+
+  shared-checks:
+    name: Shared frontend regression tests
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should_check == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint shared source and root lint configuration
+        run: |
+          pnpm --filter @quenching/shared lint
+          pnpm exec eslint eslint.config.mjs
+      - run: pnpm --filter @quenching/shared test
+
+  summary:
+    name: Frontend CI summary
+    needs: [detect-changes, app-checks, shared-checks]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require detection, installation and every selected check
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python scripts/ci/check_results.py --required detect-changes --conditional app-checks shared-checks

@@ -1,0 +1,25 @@
+{
+  "name": "@quenching/shared",
+  "private": true,
+  "scripts": {
+    "lint": "eslint .",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "description": "淬火 用户端(web)/管理端(admin) 共享层：HTTP 基础设施、领域服务、通用组件与主题（TS 源码直发，无需预构建）",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles/theme.css": "./src/styles/theme.css"
+  },
+  "peerDependencies": {
+    "axios": "^1.7.9",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "^5.9.0"
+  }
+}

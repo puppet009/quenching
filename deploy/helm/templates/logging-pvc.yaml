@@ -1,0 +1,30 @@
+{{/* 共享日志卷：所有后端服务挂载同一块 PVC，各自写独立文件。
+     单节点 k3s 下 RWO 即可被同节点多个 Pod 同时挂载。
+     全部取值 nil 安全：--reuse-values 缺 logging 段时使用默认值。 */}}
+{{- $name := printf "%s-logs" (include "quenching.name" .) -}}
+{{- $existing := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $name -}}
+{{- if or $existing (and (eq (include "quenching.logEnabled" .) "true") (empty (include "quenching.logHostPath" .))) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "quenching.name" . }}-logs
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "quenching.labels" . | nindent 4 }}
+    app.kubernetes.io/component: logging
+spec:
+  {{- if $existing }}
+  {{- toYaml $existing.spec | nindent 2 }}
+  {{- else }}
+  accessModes:
+    - {{ include "quenching.logAccessMode" . }}
+  resources:
+    requests:
+      storage: {{ include "quenching.logSize" . }}
+  {{- $sc := include "quenching.logStorageClass" . }}
+  {{- if $sc }}
+  storageClassName: {{ $sc }}
+  {{- end }}
+  {{- end }}
+{{- end }}

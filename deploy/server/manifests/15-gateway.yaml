@@ -1,0 +1,22 @@
+# api-gateway 公网暴露：chart 自带 Service 固定 ClusterIP（service.yaml 模板），
+# 这里补一个独立的 NodePort Service，固定 nodePort 30082。
+# 单机用 NodePort 即可：k3s 会在所有节点 IP 上直接监听该端口，无需 ServiceLB DaemonPod
+# （LoadBalancer 类型会让 ServiceLB 尝试占用主机 80 端口，与 svclb-traefik 冲突而 Pending）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway-public
+  namespace: platform
+spec:
+  type: NodePort
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: quenching
+    app.kubernetes.io/instance: quenching
+    app.kubernetes.io/component: api-gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30082
+      protocol: TCP

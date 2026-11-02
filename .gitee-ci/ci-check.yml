@@ -1,0 +1,295 @@
+# ============================================================
+# Gitee Go - CI 检查门禁（总入口）
+#
+# 功能：Go/Python/前端三栈统一 CI 检查
+# 触发：push main / PR main / 手动
+#
+# 注意：Gitee Go 用单文件多阶段方式，
+#      与 GitHub Actions 的多 workflow 对应。
+# ============================================================
+
+name: ci-check
+displayName: CI 检查门禁
+
+triggers:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/**"
+      - "apps/**"
+      - "packages/**"
+      - ".gitee-ci/ci-check.yml"
+      - "go.work"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "services/**"
+      - "apps/**"
+      - "packages/**"
+      - ".gitee-ci/ci-check.yml"
+      - "go.work"
+
+stages:
+  # ============================================================
+  # Go 服务检查
+  # ============================================================
+  - stage: go-ci
+    displayName: Go 服务检查
+    steps:
+      - step: detect_go_changes
+        displayName: 检测 Go 变更
+        script: |
+          set -e
+
+          if [ "$GITEE_BUILD_REASON" = "PullRequest" ]; then
+            CHANGED=$(git diff --name-only origin/$GITEE_PR_TARGET_BRANCH...HEAD | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD | tr '\n' ' ')
+          fi
+
+          echo "变更文件: $CHANGED"
+
+          # 公共包变更 → 全量
+          if echo "$CHANGED" | grep -qE "packages/|go\.work|go\.work\.sum|\.gitee-ci/ci-check"; then
+            GO_SERVICES="user-service content-service sandbox-service training-service fault-engine review-service api-gateway"
+            echo "公共包变更，全量检查 Go 服务"
+          else
+            GO_SERVICES=""
+            for svc in user-service content-service sandbox-service training-service fault-engine review-service api-gateway; do
+              if echo "$CHANGED" | grep -q "services/$svc/"; then
+                GO_SERVICES="$GO_SERVICES $svc"
+              fi
+            done
+          fi
+
+          GO_SERVICES=$(echo "$GO_SERVICES" | xargs)
+          echo "需要检查的 Go 服务: $GO_SERVICES"
+          echo "GO_SERVICES=$GO_SERVICES" >> $GITEE_ENV_FILE
+
+          if [ -z "$GO_SERVICES" ]; then
+            echo "SKIP_GO=true" >> $GITEE_ENV_FILE
+          else
+            echo "SKIP_GO=false" >> $GITEE_ENV_FILE
+          fi
+
+      - step: go_format
+        displayName: Go 格式检查
+        condition: SKIP_GO == "false"
+        script: |
+          set -e
+          for svc in $GO_SERVICES; do
+            echo "=== gofmt: $svc ==="
+            cd "services/$svc"
+            UNFORMATTED=$(gofmt -l .)
+            if [ -n "$UNFORMATTED" ]; then
+              echo "❌ $svc 格式错误:"
+              echo "$UNFORMATTED"
+              exit 1
+            fi
+            cd ../..
+            echo "✅ $svc gofmt 通过"
+          done
+
+      - step: go_vet
+        displayName: Go 静态分析
+        condition: SKIP_GO == "false"
+        script: |
+          set -e
+          for svc in $GO_SERVICES; do
+            echo "=== go vet: $svc ==="
+            cd "services/$svc"
+            go vet ./...
+            cd ../..
+            echo "✅ $svc go vet 通过"
+          done
+
+      - step: go_test
+        displayName: Go 单元测试
+        condition: SKIP_GO == "false"
+        script: |
+          set -e
+          for svc in $GO_SERVICES; do
+            echo "=== go test: $svc ==="
+            cd "services/$svc"
+            go test -race -coverprofile=coverage.out ./...
+            cd ../..
+            echo "✅ $svc 测试通过"
+          done
+
+      - step: go_build
+        displayName: Go 编译验证
+        condition: SKIP_GO == "false"
+        script: |
+          set -e
+          for svc in $GO_SERVICES; do
+            echo "=== go build: $svc ==="
+            cd "services/$svc"
+            if [ -d "cmd" ]; then
+              for cmd_dir in cmd/*/; do
+                cmd_name=$(basename "$cmd_dir")
+                echo "编译 $cmd_name"
+                go build -o /dev/null "./$cmd_dir"
+              done
+            fi
+            cd ../..
+            echo "✅ $svc 编译通过"
+          done
+
+  # ============================================================
+  # Python AI 服务检查
+  # ============================================================
+  - stage: python-ci
+    displayName: Python AI 服务检查
+    steps:
+      - step: detect_python_changes
+        displayName: 检测 Python 变更
+        script: |
+          set -e
+
+          if [ "$GITEE_BUILD_REASON" = "PullRequest" ]; then
+            CHANGED=$(git diff --name-only origin/$GITEE_PR_TARGET_BRANCH...HEAD | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD | tr '\n' ' ')
+          fi
+
+          if echo "$CHANGED" | grep -qE "services/ai-service/|\.gitee-ci/ci-check"; then
+            echo "SKIP_PYTHON=false" >> $GITEE_ENV_FILE
+            echo "ai-service 有变更，执行检查"
+          else
+            echo "SKIP_PYTHON=true" >> $GITEE_ENV_FILE
+            echo "ai-service 无变更，跳过"
+          fi
+
+      - step: python_black
+        displayName: Python 格式检查 (black)
+        condition: SKIP_PYTHON == "false"
+        script: |
+          set -e
+          pip install black==24.10.0 -q
+          cd services/ai-service
+          black --check app/ tests/
+          echo "✅ black 格式检查通过"
+
+      - step: python_ruff
+        displayName: Python 静态分析 (ruff)
+        condition: SKIP_PYTHON == "false"
+        script: |
+          set -e
+          pip install ruff==0.9.2 -q
+          cd services/ai-service
+          ruff check app/ tests/
+          echo "✅ ruff 静态分析通过"
+
+      - step: python_test
+        displayName: Python 单元测试 (pytest)
+        condition: SKIP_PYTHON == "false"
+        script: |
+          set -e
+          cd services/ai-service
+          pip install -r requirements.txt -q
+          pip install pytest pytest-cov -q
+          pytest tests/ -v --cov=app
+          echo "✅ pytest 单元测试通过"
+
+  # ============================================================
+  # 前端检查
+  # ============================================================
+  - stage: frontend-ci
+    displayName: 前端检查
+    steps:
+      - step: detect_frontend_changes
+        displayName: 检测前端变更
+        script: |
+          set -e
+
+          if [ "$GITEE_BUILD_REASON" = "PullRequest" ]; then
+            CHANGED=$(git diff --name-only origin/$GITEE_PR_TARGET_BRANCH...HEAD | tr '\n' ' ')
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD | tr '\n' ' ')
+          fi
+
+          FRONTEND_APPS=""
+          for app in web admin; do
+            if echo "$CHANGED" | grep -q "apps/$app/"; then
+              FRONTEND_APPS="$FRONTEND_APPS $app"
+            fi
+          done
+
+          # 公共包变更 → 全量
+          if echo "$CHANGED" | grep -qE "packages/|pnpm-workspace\.yaml"; then
+            FRONTEND_APPS="web admin"
+          fi
+
+          FRONTEND_APPS=$(echo "$FRONTEND_APPS" | xargs)
+          echo "需要检查的前端应用: $FRONTEND_APPS"
+          echo "FRONTEND_APPS=$FRONTEND_APPS" >> $GITEE_ENV_FILE
+
+          if [ -z "$FRONTEND_APPS" ]; then
+            echo "SKIP_FRONTEND=true" >> $GITEE_ENV_FILE
+          else
+            echo "SKIP_FRONTEND=false" >> $GITEE_ENV_FILE
+          fi
+
+      - step: frontend_install
+        displayName: 前端依赖安装
+        condition: SKIP_FRONTEND == "false"
+        script: |
+          set -e
+          npm install -g pnpm@9
+          pnpm install --frozen-lockfile
+          echo "✅ 前端依赖安装完成"
+
+      - step: frontend_lint
+        displayName: 前端 Lint 检查
+        condition: SKIP_FRONTEND == "false"
+        script: |
+          set -e
+          for app in $FRONTEND_APPS; do
+            echo "=== lint: $app ==="
+            cd "apps/$app"
+            if grep -q '"lint"' package.json; then
+              pnpm lint
+            else
+              echo "⚠️  未配置 lint，跳过"
+            fi
+            cd ../..
+            echo "✅ $app lint 通过"
+          done
+
+      - step: frontend_build
+        displayName: 前端构建验证
+        condition: SKIP_FRONTEND == "false"
+        script: |
+          set -e
+          for app in $FRONTEND_APPS; do
+            echo "=== build: $app ==="
+            cd "apps/$app"
+            if grep -q '"build"' package.json; then
+              pnpm build
+            else
+              echo "⚠️  未配置 build，跳过"
+            fi
+            cd ../..
+            echo "✅ $app 构建通过"
+          done
+
+  # ============================================================
+  # 汇总
+  # ============================================================
+  - stage: summary
+    displayName: CI 检查完成
+    steps:
+      - step: done
+        displayName: 全部检查完成
+        script: |
+          echo "========================================"
+          echo "  CI 检查门禁执行完成"
+          echo "========================================"
+          echo ""
+          echo "Go 服务:       $([ "$SKIP_GO" = "true" ] && echo "跳过" || echo "已检查")"
+          echo "Python AI:     $([ "$SKIP_PYTHON" = "true" ] && echo "跳过" || echo "已检查")"
+          echo "前端:          $([ "$SKIP_FRONTEND" = "true" ] && echo "跳过" || echo "已检查")"
+          echo ""
+          echo "🎉 全部检查通过！"

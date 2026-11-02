@@ -1,0 +1,6 @@
+DROP TABLE sandbox_operation_remote_seals;
+DROP TABLE sandbox_operation_reply_links;
+DROP TABLE sandbox_operation_texts;
+DROP TABLE sandbox_operation_events;
+DROP TABLE sandbox_operation_intents;
+DROP TABLE sandbox_operation_audit_sessions;

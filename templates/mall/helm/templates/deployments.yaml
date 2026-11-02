@@ -1,0 +1,174 @@
+{{- range $name, $service := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ $name }}
+  template:
+    metadata:
+      annotations:
+        quenching.io/template-digest: {{ default "" $.Values.global.templateDigest | quote }}
+        quenching.io/terminal-directories: {{ dict $name (dict "working_dir" $service.terminal.workingDir "deployment_dir" (default "" $service.terminal.deploymentDir) "config_dir" (default "" $service.terminal.configDir)) | toJson | quote }}
+      labels:
+        app.kubernetes.io/name: mall
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/component: {{ $name }}
+    spec:
+      {{- with $.Values.global.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      enableServiceLinks: false
+      {{- if eq $name "rabbitmq" }}
+      # RabbitMQ data directories depend on the Erlang node hostname.
+      hostname: rabbitmq
+      {{- end }}
+      {{- with $.Values.global.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if eq $name "mall-portal" }}
+      initContainers:
+        - name: wait-for-dependencies
+          image: {{ include "mall.image" (dict "root" $ "image" $.Values.initImage) | quote }}
+          imagePullPolicy: {{ default $.Values.global.image.pullPolicy $.Values.initImage.pullPolicy }}
+          command: ["sh", "-ec"]
+          args:
+            - |
+              for endpoint in mysql:3306 redis:6379 rabbitmq:5672 mongo:27017; do
+                until nc -z -w 2 "${endpoint%:*}" "${endpoint##*:}"; do
+                  echo "waiting for $endpoint"
+                  sleep 2
+                done
+              done
+          resources:
+            requests: {cpu: 25m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 32Mi}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "mall.image" (dict "root" $ "image" $service.image) | quote }}
+          imagePullPolicy: {{ default $.Values.global.image.pullPolicy $service.image.pullPolicy }}
+          ports:
+            - name: tcp
+              containerPort: {{ $service.port }}
+          resources:
+            {{- toYaml $service.resources | nindent 12 }}
+          {{- if eq $name "mysql" }}
+          args:
+            - --character-set-server=utf8mb4
+            - --collation-server=utf8mb4_unicode_ci
+            - --innodb-buffer-pool-size=128M
+            - --max-connections=50
+            - --performance-schema=OFF
+          env:
+            - name: MYSQL_DATABASE
+              value: mall
+            - name: MYSQL_USER
+              value: mall
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: "{{ $.Release.Name }}-credentials", key: mysql-password}
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: "{{ $.Release.Name }}-credentials", key: mysql-root-password}
+          readinessProbe:
+            exec:
+              command: ["sh", "-ec", 'MYSQL_PWD="$MYSQL_PASSWORD" mysql --protocol=TCP -h 127.0.0.1 -u mall mall -e "SELECT 1 FROM pms_product LIMIT 1"']
+            periodSeconds: 10
+            timeoutSeconds: 5
+          {{- else if eq $name "redis" }}
+          command: ["redis-server", "--appendonly", "yes", "--maxmemory", "80mb", "--maxmemory-policy", "noeviction"]
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            periodSeconds: 10
+            timeoutSeconds: 3
+          {{- else if eq $name "rabbitmq" }}
+          env:
+            - {name: RABBITMQ_DEFAULT_USER, value: mall}
+            - {name: RABBITMQ_DEFAULT_VHOST, value: /mall}
+            - {name: RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS, value: "+S 1:1 +A 4"}
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef: {name: "{{ $.Release.Name }}-credentials", key: rabbit-password}
+          readinessProbe:
+            tcpSocket: {port: tcp}
+            periodSeconds: 10
+          {{- else if eq $name "mongo" }}
+          args: ["--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping:1}).ok ? 0 : 1)"]
+            periodSeconds: 15
+            timeoutSeconds: 5
+          {{- else if eq $name "mall-portal" }}
+          env:
+            - {name: SPRING_PROFILES_ACTIVE, value: sandbox}
+            - {name: JAVA_TOOL_OPTIONS, value: "-XX:MaxRAMPercentage=65 -XX:InitialRAMPercentage=20 -XX:ActiveProcessorCount=2"}
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: "{{ $.Release.Name }}-credentials", key: mysql-password}
+            - name: RABBIT_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: "{{ $.Release.Name }}-credentials", key: rabbit-password}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: {name: "{{ $.Release.Name }}-credentials", key: jwt-secret}
+            - name: SANDBOX_PAYMENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: "{{ $.Release.Name }}-credentials", key: sandbox-payment-key}
+          readinessProbe:
+            httpGet: {path: /actuator/health, port: tcp}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          {{- else if eq $name "frontend" }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: tcp}
+            periodSeconds: 5
+          {{- end }}
+          startupProbe:
+            tcpSocket: {port: tcp}
+            periodSeconds: 5
+            failureThreshold: 60
+          {{- if or $service.storage $service.workspace }}
+          volumeMounts:
+            {{- if $service.workspace }}
+            - name: workspace
+              mountPath: /workspace
+            {{- end }}
+            {{- if $service.storage }}
+            - name: data
+              mountPath: {{ index (dict "mysql" "/var/lib/mysql" "redis" "/data" "rabbitmq" "/var/lib/rabbitmq" "mongo" "/data/db") $name }}
+            {{- end }}
+          {{- end }}
+      {{- if or $service.storage $service.workspace }}
+      volumes:
+        {{- if $service.workspace }}
+        - name: workspace
+          {{- if $.Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $.Release.Name }}-{{ $name }}-workspace
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+        {{- if $service.storage }}
+        - name: data
+          {{- if $.Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $.Release.Name }}-{{ $name }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,47 @@
+# 依赖与构建
+node_modules/
+dist/
+build/
+bin/
+*.exe
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.tsbuildinfo
+
+# Python 测试与覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.out
+coverage.xml
+*.out
+
+# Go
+vendor/
+
+# 环境与密钥
+.env
+.env.local
+*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+/logs/
+
+# 本地验证产物与 AI 执行记录
+/output/
+/.superpowers/
+/docs/superpowers/
+/docs/internal/
+/.install-tmp/

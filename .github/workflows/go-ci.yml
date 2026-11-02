@@ -1,0 +1,160 @@
+name: Go Services CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.27.0'
+
+jobs:
+  detect-changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.detect.outputs.services }}
+      should_check: ${{ steps.detect.outputs.should_check }}
+      check_all: ${{ steps.detect.outputs.check_all }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: detect
+        run: python scripts/ci/detect_changes.py --kind go
+
+  guards:
+    name: Structure and service boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: CI change-selection and summary regression tests
+        run: python -m unittest discover -s scripts/ci -p 'test_*.py'
+      - name: Public export regression tests
+        run: python -m unittest discover -s scripts/release -p 'test_*.py'
+      - name: Structure and domain ownership
+        run: |
+          python scripts/check_structure.py
+          python scripts/release/check_version.py
+          python scripts/qa/domain-boundaries.py
+      # Native Go parsing preserves the depguard prohibition without requiring
+      # a golangci-lint binary built with the same compiler as the workspace.
+      - name: Cross-service imports (including tests and generated code)
+        run: |
+          test -z "$(gofmt -l scripts/ci/*.go)"
+          go test scripts/ci/check_go_boundaries.go scripts/ci/check_go_boundaries_test.go
+          go run scripts/ci/check_go_boundaries.go
+
+  service-checks:
+    name: '${{ matrix.service }}: format, vet, test, build'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should_check == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.detect-changes.outputs.services) }}
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.work.sum
+            services/**/go.sum
+            packages/**/go.sum
+      - name: Download dependencies
+        run: go mod download
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: Unit tests with race detector and coverage
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Build all packages and commands
+        run: go build ./...
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.service }}
+          path: services/${{ matrix.service }}/coverage.out
+
+  shared-checks:
+    name: '${{ matrix.module }}: format, vet, test, build'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.should_check == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [go-common, proto]
+    defaults:
+      run:
+        working-directory: packages/${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.work.sum
+            services/**/go.sum
+            packages/**/go.sum
+      - name: Download dependencies
+        run: go mod download
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: Unit tests with race detector and coverage
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Build
+        run: go build ./...
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.module }}
+          path: packages/${{ matrix.module }}/coverage.out
+
+  summary:
+    name: Go CI summary
+    needs: [detect-changes, guards, service-checks, shared-checks]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require every selected check to succeed
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python scripts/ci/check_results.py --required detect-changes guards --conditional service-checks shared-checks

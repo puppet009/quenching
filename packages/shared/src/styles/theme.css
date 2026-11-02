@@ -1,0 +1,109 @@
+/* 淬火 品牌与语义色 token（Tailwind v4 @theme，供 web/admin 双端引入）
+   注意：本文件只放 @theme 与自定义类；@import "tailwindcss" 由各应用自身的 index.css 引入。
+   - brand：淬火橙，品牌强调（CTA/链接/logo）
+   - ink：墨灰，主文字与基底
+   - 语义色仅用于状态：ok 正常 / warn 注意 / danger 故障 / ai AI相关
+*/
+/* workspace 包位于应用源码目录外，显式扫描共享组件的 Tailwind 类。 */
+@source "../components";
+
+@theme {
+  --color-brand-50: #fff3ea;
+  --color-brand-100: #ffe2cf;
+  --color-brand-200: #ffc49f;
+  --color-brand-300: #fd9d64;
+  --color-brand-400: #fb7a35;
+  --color-brand-500: #ea580c;
+  --color-brand-600: #c2410c;
+  --color-brand-700: #9a3412;
+
+  --color-ink-50: #f7f8fa;
+  --color-ink-100: #eef0f4;
+  --color-ink-200: #d9dee7;
+  --color-ink-300: #b6bfcd;
+  --color-ink-400: #8993a4;
+  --color-ink-500: #5f6979;
+  --color-ink-600: #444d5c;
+  --color-ink-700: #2b3440;
+  --color-ink-800: #1c2430;
+  --color-ink-900: #121821;
+
+  --color-ok: #0d9488;
+  --color-warn: #d97706;
+  --color-danger: #dc2626;
+  --color-ai: #6d5efc;
+}
+
+/* 流式页面容器：宽度随屏幕伸缩，只保留随视口缩放的安全边距，
+   不写死 1152px 一类固定上限，避免宽屏下两侧大片留白。 */
+.page-container {
+  width: 100%;
+  max-width: min(1680px, calc(100% - clamp(24px, 4vw, 64px)));
+  margin-inline: auto;
+}
+
+/* 技术感底纹：极细网格 + 径向渐隐遮罩 */
+.bg-blueprint {
+  background-image:
+    linear-gradient(to right, rgba(28, 36, 48, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(28, 36, 48, 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 90% 80% at 60% 35%, #000 30%, transparent 75%);
+  mask-image: radial-gradient(ellipse 90% 80% at 60% 35%, #000 30%, transparent 75%);
+}
+
+/* 入场与悬浮动画 */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(220, 38, 36, 0.45); }
+  50% { opacity: 0.65; box-shadow: 0 0 0 6px rgba(220, 38, 36, 0); }
+}
+.animate-rise { animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-floaty { animation: floaty 5.5s ease-in-out infinite; }
+.animate-pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
+
+/* 表单输入通用样式 */
+.form-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 13px;
+  border: 1px solid var(--color-ink-200);
+  border-radius: var(--radius, 10px);
+  background: var(--color-ink-50);
+  font-size: 13px;
+  color: var(--color-ink-800);
+  outline: none;
+}
+.form-input::placeholder { color: var(--color-ink-400); }
+.form-input:focus {
+  border-color: var(--color-brand-500);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--color-brand-50);
+}
+
+/* 弹窗动画 */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-scale-in { animation: scale-in 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* 文本截断 */
+.line-clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

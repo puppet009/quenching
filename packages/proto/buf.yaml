@@ -1,0 +1,17 @@
+version: v2
+# proto 契约工程：lint + 代码生成统一用 buf。
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX # 包名用 quenching.ai.v1，不强制 .v 后缀风格
+    # Chat 与 ChatStream 入参刻意复用同一个 ChatRequest（同一对话请求，仅传输方式
+    # 非流式/流式之分）；流式出参用语义化的 ChatChunk，故关闭 RPC 类型唯一/标准命名。
+    - RPC_REQUEST_RESPONSE_UNIQUE
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE

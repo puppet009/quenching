@@ -1,0 +1,4 @@
+/* Tailwind v4：指令在应用内引入；品牌 @theme 与通用类来自共享包，保证双端样式单一来源 */
+@import "tailwindcss";
+@import "@quenching/shared/styles/theme.css";
+@import "./workbench.css";

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mall
+description: Quenching loading-validation adapter for the pinned upstream mall storefront
+type: application
+version: 0.1.0
+appVersion: dcaa93b-b1eb3cd

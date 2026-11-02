@@ -1,0 +1,22 @@
+server:
+  addr: ":8085"
+  mode: "debug"   # debug / release
+log:
+  level: "info"
+  dir: ""         # 落盘目录，空=仅 stdout；集群由 Helm 注入
+db:
+  # 本地开发默认连 docker-compose 的 PostgreSQL；生产用环境变量 DB_DSN 覆盖
+  dsn: "postgres://quenching:quenching@localhost:5432/quenching?sslmode=disable"
+internal:
+  # 服务间共享密钥；本地留空不校验 X-Internal-Token，生产必须通过环境变量注入
+  token: ""
+
+auth:
+  # MVP 未接短信服务，手机号/邮箱均使用账号密码注册；不证明账号归属。
+  # 接入真实 SMSService 后才设为 true；AUTH_REGISTRATION_SMS_REQUIRED 可覆盖。
+  registration_sms_required: false
+
+# review-service 服务端埋点上报（东西向直连 /internal/v1，不经网关）。
+# 懒连接：留空时客户端禁用，注册流程照常；本地联调填 http://localhost:8087。
+review_service:
+  base_url: ""

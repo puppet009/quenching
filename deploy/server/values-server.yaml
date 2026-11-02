@@ -1,0 +1,132 @@
+# ============================================================================
+# values-server.yaml  火山引擎单机部署覆盖值
+# 用法：
+#   helm install quenching ./deploy/helm -n platform \
+#     --create-namespace -f deploy/server/values-server.yaml
+#
+# 与默认 values.yaml 的差异：
+#   - namespace 覆盖为 platform（沙箱 NetworkPolicy 硬约束）
+#   - api-gateway 单副本
+#   - LLM 不用 mock，也不配 key（先验证页面与其他功能，key 后补）
+#   - 替换默认密钥/内部 token
+# 生成新密钥可用：openssl rand -hex 32
+# ============================================================================
+
+global:
+  imageTag: "0.1.0-alpha.1"
+  imagePullPolicy: IfNotPresent
+  namespace: platform
+  jwtSecret: "REPLACE_WITH_helm_or_set_below"   # 部署时用 --set 覆盖
+  internalToken: "REPLACE_WITH_INTERNAL_TOKEN"  # 部署时用 --set 覆盖；须与 observability.wsGatewayApiKey 一致
+  ginMode: "release"
+  timezone: "Asia/Shanghai"
+
+# 单机日志位于仓库根目录，与 services 同级；其他路径用 --set-string 覆盖。
+logging:
+  collector:
+    enabled: true
+  persistence:
+    enabled: true
+    hostPath: "/data/src/quenching/logs"
+
+# 中间件直连 10-middleware.yaml 创建的集群内 Service
+postgresql:
+  external:
+    enabled: true
+    host: "postgresql"
+    port: 5432
+    database: "quenching"
+    username: "quenching"
+    password: "quenching"
+
+rabbitmq:
+  external:
+    enabled: true
+    host: "rabbitmq"
+    port: 5672
+    username: "guest"
+    password: "guest"
+
+redis:
+  external:
+    enabled: true
+    host: "redis"
+    port: 6379
+
+ai:
+  grpcAddr: "ai-service:9000"
+  llmMock: "false"        # 不用 mock；key 暂空，AI 调用报错属预期
+  llmApiKey: ""
+  llmProvider: "qwen"
+  llmBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode"
+  llmModel: "qwen3.8-flash"
+  llmTimeout: "300"
+  llmMaxRetries: "3"
+
+observability:
+  prometheusUrl: "http://prometheus-server:9090"
+  lokiUrl: ""
+  wsGatewayApiKey: "REPLACE_WITH_INTERNAL_TOKEN"
+  releaseName: "sandbox"
+
+services:
+  api-gateway:
+    enabled: true
+    port: 8080
+    replicas: 1
+    useClusterRoutes: true
+    # Resource defaults inherited from deploy/helm/values.yaml.
+
+  content-service:
+    enabled: true
+    port: 8082
+    replicas: 1
+    config: true
+    # Resource defaults inherited from deploy/helm/values.yaml.
+
+  user-service:
+    enabled: true
+    port: 8085
+    replicas: 1
+    config: true
+    registrationSMSRequired: false # MVP 尚未接短信服务
+    # Resource defaults inherited from deploy/helm/values.yaml.
+
+  training-service:
+    enabled: true
+    port: 8086
+    replicas: 1
+    config: true
+    # Resource defaults inherited from deploy/helm/values.yaml.
+
+  review-service:
+    enabled: true
+    port: 8087
+    replicas: 1
+    config: true
+    # Resource defaults inherited from deploy/helm/values.yaml.
+
+  fault-engine:
+    enabled: true
+    port: 8088
+    replicas: 1
+    config: true
+    # Resource defaults inherited from deploy/helm/values.yaml.
+
+  sandbox-service:
+    enabled: true
+    port: 8089
+    replicas: 1
+    config: true
+    kubeconfigPath: ""
+    # Resource defaults inherited from deploy/helm/values.yaml.
+
+  ai-service:
+    enabled: true
+    httpPort: 8000
+    grpcPort: 9000
+    replicas: 1
+    # Resource defaults inherited from deploy/helm/values.yaml.
+
+ingress:
+  enabled: false

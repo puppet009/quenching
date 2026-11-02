@@ -1,0 +1,289 @@
+syntax = "proto3";
+
+package quenching.ai.v1;
+
+option go_package = "github.com/quenching/proto/aiv1;aiv1";
+
+// ai-service 对外契约（Go 服务调用 Python AI 能力）。
+// MVP 合并部署时以本地/HTTP 调用为主，proto 先行定义，未来拆分微服务直接启用 gRPC。
+service AIService {
+  rpc GenerateGrowthReviewStep(GrowthReviewStepRequest) returns (GrowthReviewStepResponse);
+  rpc SummarizeSessionMemory(SessionMemoryRequest) returns (SessionMemoryResponse);
+  rpc AssessAbility(AssessAbilityRequest) returns (AssessAbilityResponse);
+  // Isolated director; never exposed as student conversation.
+  rpc BrainDecide(BrainDecideRequest) returns (BrainDecideResponse);
+  // 生成复盘报告（方法级）。
+  rpc GenerateReview(GenerateReviewRequest) returns (GenerateReviewResponse);
+  // AI 助教对话（非流式，服务间/简单场景用）。
+  rpc Chat(ChatRequest) returns (ChatResponse);
+  // AI 助教对话（服务端流式）：Go 编排层逐块接收并转发为前端 SSE。
+  // 取消由调用方 context 级联传播，用户停止生成时 Python 侧立即终止、不再烧 token。
+  rpc ChatStream(ChatRequest) returns (stream ChatChunk);
+  // 协作行为评估：training-service 收集原始协作事件，ai-service 按确定性规则
+  // 计算三维子分（不调 LLM），training-service 负责加权合并与回写。
+  rpc EvaluateCollab(EvaluateCollabRequest) returns (EvaluateCollabResponse);
+  // 人机对照总结（服务端流式）：training-service 把最近一对交叉配对会话的两侧
+  // 指标与双雷达 JSON 传入，ai-service 逐块产出对照分析文本；Go 编排层转 SSE。
+  rpc GenerateComparisonSummary(ComparisonSummaryRequest) returns (stream ComparisonSummaryChunk);
+}
+
+message GrowthReviewStepRequest {
+  int64 session_id = 1;
+  string mode = 2;
+  string input_json = 3;
+  string snapshot_hash = 4;
+}
+
+message GrowthReviewStepResponse {
+  string result_json = 1;
+  string actual_model = 2;
+  string request_id = 3;
+  string prompt_version = 4;
+  int64 prompt_tokens = 5;
+  int64 completion_tokens = 6;
+  double latency_ms = 7;
+  bool mocked = 8;
+}
+
+// PitfallOutcome 坑点结局：识别/踩中/未决（未决不计入识别率分母）。
+enum PitfallOutcome {
+  PITFALL_OUTCOME_UNSPECIFIED = 0;
+  PITFALL_OUTCOME_RECOGNIZED = 1; // 识别了错误建议（dispute/verified）
+  PITFALL_OUTCOME_FELL = 2;       // 踩坑（agree/fell）
+  PITFALL_OUTCOME_PENDING = 3;    // 尚无结局，不计入
+}
+
+// ActionKind 用户操作归类：仅 follow_ai 计入证据验证率分母。
+enum ActionKind {
+  ACTION_KIND_UNSPECIFIED = 0;
+  ACTION_KIND_FOLLOW_AI = 1;  // 采纳 AI 建议
+  ACTION_KIND_INDEPENDENT = 2; // 自主操作
+}
+
+// CollabQuestion 一次用户提问（来源：training_assistant 会话中的 user 消息）。
+message CollabQuestion {
+  string text = 1;                          // 提问原文
+  string stage = 2;                         // 提问所处排障阶段（可为空）
+  bool references_known_info = 3;           // 是否引用了已知信息
+  bool follow_up = 4;                       // 是否为追问
+}
+
+// CollabPitfall 一次坑点遭遇的结局（来源：ai_messages.is_pitfall 标记消息的应答类型）。
+message CollabPitfall {
+  PitfallOutcome outcome = 1;
+}
+
+// CollabAction 一次排障操作（来源：session_operations）。
+message CollabAction {
+  ActionKind kind = 1;
+  bool verified_before_follow = 2; // 采纳前是否做了证据验证
+}
+
+message EvaluateCollabRequest {
+  int64 session_id = 1;
+  repeated CollabQuestion questions = 2;
+  repeated CollabPitfall pitfalls = 3;
+  repeated CollabAction actions = 4;
+}
+
+message EvaluateCollabResponse {
+  // 无任何协作行为（纯人工 A0）时 available=false，三个子分为 0，
+  // 调用方不得据此拉低综合分。
+  bool available = 1;
+  double question_quality_score = 2;  // 提问质量 0-100
+  double info_utilization_score = 3;  // 信息利用率 0-100
+  double judgment_score = 4;          // 判断力 0-100
+  // 错误建议识别率 0-100（recognized/(recognized+fell)，未决不计）。
+  double error_recognition_rate = 5;
+  // 证据验证率 0-100（采纳前验证数/follow_ai 数）。
+  double evidence_validation_rate = 6;
+  int32 pitfall_total = 7;      // 遭遇且有结局的坑点数（recognized+fell）
+  int32 pitfall_recognized = 8; // 其中识别数
+  int32 follow_total = 9;       // 采纳 AI 建议的操作数
+  int32 follow_verified = 10;   // 采纳前做了证据验证的操作数
+}
+
+// ChatChunk 流式对话分块。type 决定使用哪些字段。
+enum ChunkType {
+  CHUNK_TYPE_UNSPECIFIED = 0;
+  CHUNK_TYPE_DELTA = 1;    // 正文增量，字段 delta
+  CHUNK_TYPE_THINKING = 2; // 思考态占位，字段 delta（可空），前端显示“思考中”
+  CHUNK_TYPE_DONE = 3;     // 正常结束，字段 prompt_tokens/completion_tokens/cost
+  CHUNK_TYPE_ERROR = 4;    // 出错，字段 error
+  CHUNK_TYPE_TOOL_CALL = 5; // LLM 请求工具调用，字段 tool_calls（观察类由编排层自动执行）
+  CHUNK_TYPE_STEP = 6;      // 步骤时间线事件，字段 step（过程透明）
+}
+
+// ToolDef 工具定义：随请求告诉 LLM 可调用哪些工具（OpenAI 风格 function schema）。
+message ToolDef {
+  string name = 1;                       // 工具名，如 get_logs
+  string description = 2;                // 工具用途描述
+  string parameters_json = 3;            // 参数的 JSON Schema
+  bool requires_approval = 4;            // 是否修改类工具（需用户确认）
+}
+
+// ToolCall LLM 请求的一次工具调用。
+message ToolCall {
+  string id = 1;                         // 本次调用唯一 id（结果按此关联）
+  string name = 2;                       // 工具名
+  string arguments_json = 3;             // 参数 JSON
+}
+
+// ToolResult 一次工具执行的结果，编排层执行后回传给 ai-service。
+message ToolResult {
+  string call_id = 1;                    // 对应 ToolCall.id
+  string content_json = 2;               // 结果内容 JSON
+  bool is_error = 3;                     // 是否执行失败
+}
+
+// StepEvent 步骤时间线事件：让用户看到助手正在执行哪一步。
+message StepEvent {
+  string step_id = 1;                    // 步骤 id
+  string state = 2;                      // started/progress/completed/failed/awaiting_approval
+  string tool = 3;                       // 工具名
+  string display = 4;                    // 人类可读动作文案
+  string summary = 5;                    // 结果摘要（可折叠展示）
+  string detail_json = 6;                // 可展开的结果详情
+}
+
+message ChatChunk {
+  ChunkType type = 1;
+  string delta = 2;
+  // 本条 assistant 回复是否为坑点消息。由 Go 编排层在 ChatRequest 中声明意图，
+  // AI 服务原样在首个 chunk 回传，便于前端即时打标；AI 服务自身不决定坑点。
+  bool is_pitfall = 3;
+  int32 prompt_tokens = 4;
+  int32 completion_tokens = 5;
+  double cost = 6;
+  string error = 7;
+  // 本次回复实际采用的提示级别（0=普通应答，1/2/3=渐进式提示），
+  // 随首个正文 chunk 回传；与 ChatRequest.hint_level 对应，便于前端/编排层核对。
+  int32 hint_level = 8;
+  // 本会话本轮之后剩余可用提示次数（-1 表示不限/未知）。由编排层计数策略决定，
+  // AI 服务仅原样回传请求中带入的值，自身不做次数决策。
+  int32 hint_remaining = 9;
+  // CHUNK_TYPE_TOOL_CALL：LLM 请求的工具调用（可能一次多个）。
+  repeated ToolCall tool_calls = 10;
+  // CHUNK_TYPE_STEP：步骤时间线事件。
+  StepEvent step = 11;
+}
+
+message GenerateReviewRequest {
+  int64 session_id = 1;
+  string fault_type = 2;
+  // 操作时间线 JSON（来自 ES / sandbox-service）。
+  string operation_timeline_json = 3;
+  // 坑点记录 JSON（来自 training-service 编排结果）。
+  string pitfall_records_json = 4;
+}
+
+message GenerateReviewResponse {
+  int64 review_id = 1;
+  // 结构化章节 JSON：根因/时间线/路径对比/方法论/坑点分析/协作评估。
+  string sections_json = 2;
+}
+
+message ChatRequest {
+  int64 session_id = 1;
+  int64 conversation_id = 2;
+  string message = 3;
+  // agent_level: A0/A1...（MVP 仅 A0/A1，A2+ 自治预留）。
+  string agent_level = 4;
+  // 多轮历史上下文 JSON：[{"role":"user|assistant|system","content":"..."}]，
+  // 不含根因；由 Go 编排层从 ai_messages 重建并脱敏后传入。
+  string history_json = 5;
+  // 对话类型：training_assistant/review_explainer/knowledge_qa/architecture_advisor。
+  string conversation_type = 6;
+  // 坑点意图：由编排层（坑点引擎命中时）置位，指示 AI 按对应坑点话术产出。
+  // MVP 训练对话恒 false；AI 服务自身不做坑点决策（T3 坑点引擎启用）。
+  bool pitfall_instruction = 7;
+  // 坑点类型（pitfall_instruction=true 时有意义）：
+  // causal_misjudgment/info_omission/overconfidence。
+  string pitfall_type = 8;
+  // 脱敏后的本次训练故障上下文 JSON（T3-4）。由 Go 编排层重建，只含用户可见
+  // 信息（故障名称、类别、难度、现象描述、当前处置状态），严禁包含 root_cause
+  // 等答案字段；AI 据此结合上下文引导思考，且不得直接给出根因。
+  string fault_context_json = 9;
+  // 渐进式提示级别（T3-5）：0=普通提问应答；1=方向引导；2=缩小范围；3=接近答案。
+  // 级别解锁与次数限制由编排层负责，AI 仅按级别选择对应话术且任何级别都不泄露根因。
+  int32 hint_level = 10;
+  // 本轮之后本会话剩余可用提示次数（编排层计数，AI 原样在 chunk 回传）。
+  int32 hint_remaining = 11;
+  // 本次对话允许 LLM 调用的工具白名单（schema）。为空表示纯对话、不启用工具。
+  repeated ToolDef tools = 12;
+  // 上一轮工具调用的执行结果（Agent Loop 回传）。首轮为空。
+  repeated ToolResult tool_results = 13;
+  string memory_context_json = 14;
+
+}
+
+message ChatResponse {
+  string reply = 1;
+  // 是否为坑点消息（由编排层决定，AI 服务本身按 content 配置产出）。
+  bool is_pitfall = 2;
+}
+
+// ComparisonSummaryRequest 人机对照总结入参。
+message ComparisonSummaryRequest {
+  // training-service 组装的对照数据 JSON：manual/aiCollab 两侧指标 + 技术/协作
+  // 双雷达（即 GET /training/comparison 的响应体）。ai-service 只据此分析，
+  // JSON 损坏或缺少两侧数据时显式失败，禁止编造数字。
+  string comparison_json = 1;
+}
+
+// ComparisonSummaryChunk 对照总结流式分块。
+message ComparisonSummaryChunk {
+  ChunkType type = 1; // THINKING/DELTA/DONE/ERROR
+  string delta = 2;
+  int32 prompt_tokens = 3;
+  int32 completion_tokens = 4;
+  double cost = 5;
+  string error = 6;
+}
+
+// One observation, with exact prior tool-call/result correlation.
+message BrainDecideRequest {
+ int64 session_id = 1;
+ string phase = 2;
+ int64 observation_version = 3;
+ string context_json = 4;
+ repeated string evidence_refs = 5;
+ repeated ToolDef allowed_tools = 6;
+ repeated ToolResult tool_results = 7;
+ repeated ToolCall previous_calls = 8;
+}
+message BrainDecideResponse {
+ string decision_json = 1;
+ repeated ToolCall tool_calls = 2;
+ string actual_model = 3;
+ string request_id = 4;
+ string prompt_version = 5;
+ int64 prompt_tokens = 6;
+ int64 completion_tokens = 7;
+ double latency_ms = 8;
+ bool mocked = 9;
+}
+
+message AssessAbilityRequest {
+  int64 session_id = 1;
+  int64 version = 2;
+  string evidence_json = 3;
+  repeated string evidence_refs = 4;
+}
+message AssessAbilityResponse {
+  string assessment_json = 1;
+  string actual_model = 2;
+  string request_id = 3;
+  string prompt_version = 4;
+  int64 prompt_tokens = 5;
+  int64 completion_tokens = 6;
+  double latency_ms = 7;
+  bool mocked = 8;
+}
+
+message SessionMemoryRequest { int64 session_id = 1; string public_input_json = 2; }
+message SessionMemoryResponse {
+ string memory_json = 1; string actual_model = 2; string request_id = 3;
+ string prompt_version = 4; int64 prompt_tokens = 5; int64 completion_tokens = 6;
+ double latency_ms = 7; bool mocked = 8;
+}

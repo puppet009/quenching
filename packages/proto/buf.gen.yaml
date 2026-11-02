@@ -1,0 +1,12 @@
+version: v2
+# Go 代码生成到本 module 的 aiv1/ 包；生成产物提交仓库，开发者无需安装 protoc。
+# 使用本地 protoc-gen-go / protoc-gen-go-grpc 插件（go install 安装，见 README）。
+plugins:
+  - local: protoc-gen-go
+    out: .
+    opt:
+      - module=github.com/quenching/proto
+  - local: protoc-gen-go-grpc
+    out: .
+    opt:
+      - module=github.com/quenching/proto

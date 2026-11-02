@@ -1,0 +1,28 @@
+{{- $root := . -}}
+{{- /* g7：ws-gateway 已并入 api-gateway */ -}}
+{{- range $name := list "api-gateway" "content-service" "user-service" "training-service" "review-service" "fault-engine" "sandbox-service" "ai-service" }}
+{{- $s := index $root.Values.services $name }}
+{{- if $s.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "quenching.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "quenching.name" $root }}
+    app.kubernetes.io/instance: {{ $root.Release.Name }}
+    app.kubernetes.io/component: {{ $name }}
+  ports:
+    {{- if eq $name "ai-service" }}
+    - { name: http, port: {{ $s.httpPort }}, targetPort: http, protocol: TCP }
+    - { name: grpc, port: {{ $s.grpcPort }}, targetPort: grpc, protocol: TCP }
+    {{- else }}
+    - { name: http, port: {{ $s.port }}, targetPort: http, protocol: TCP }
+    {{- end }}
+{{- end }}
+{{- end }}

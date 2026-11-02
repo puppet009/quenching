@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["global", "services", "persistence", "credentials", "initImage"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "required": ["image"],
+      "properties": {
+        "image": {
+          "type": "object",
+          "properties": {
+            "registry": {"type": "string"},
+            "repository": {"type": "string"},
+            "tag": {"type": "string", "minLength": 1},
+            "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]},
+            "pullSecrets": {
+              "type": "array",
+              "items": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "minLength": 1}}}
+            }
+          }
+        }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "properties": {"enabled": {"type": "boolean"}, "storageClass": {"type": "string"}}
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frontend", "mall-portal", "mysql", "redis", "rabbitmq", "mongo"],
+      "properties": {
+        "frontend": {"allOf": [{"$ref": "#/definitions/service"}, {"properties": {"port": {"const": 80}}}]},
+        "mall-portal": {"allOf": [{"$ref": "#/definitions/service"}, {"properties": {"port": {"const": 8085}}}]},
+        "mysql": {"allOf": [{"$ref": "#/definitions/service"}, {"properties": {"port": {"const": 3306}}}]},
+        "redis": {"allOf": [{"$ref": "#/definitions/service"}, {"properties": {"port": {"const": 6379}}}]},
+        "rabbitmq": {"allOf": [{"$ref": "#/definitions/service"}, {"properties": {"port": {"const": 5672}}}]},
+        "mongo": {"allOf": [{"$ref": "#/definitions/service"}, {"properties": {"port": {"const": 27017}}}]}
+      }
+    }
+  },
+  "definitions": {
+    "service": {
+      "type": "object",
+      "required": ["image", "port", "resources", "terminal"],
+      "properties": {
+        "port": {"type": "integer"},
+        "image": {"type": "object"},
+        "workspace": {
+          "type": "object",
+          "required": ["storage"],
+          "properties": {"storage": {"type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi)$"}}
+        },
+        "terminal": {
+          "type": "object",
+          "required": ["workingDir"],
+          "properties": {
+            "workingDir": {"type": "string", "pattern": "^/"},
+            "deploymentDir": {"type": "string", "pattern": "^/"},
+            "configDir": {"type": "string", "pattern": "^/"}
+          }
+        },
+        "resources": {"type": "object", "required": ["requests", "limits"]}
+      }
+    }
+  }
+}

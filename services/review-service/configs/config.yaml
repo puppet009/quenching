@@ -1,0 +1,43 @@
+server:
+  addr: ":8087"
+  mode: "debug"   # debug / release
+
+log:
+  level: "info"   # debug / info / warn / error
+  dir: ""         # 落盘目录，空=仅 stdout；集群由 Helm 注入
+
+db:
+  # 本地 docker-compose 默认值；生产用环境变量 DB_DSN 覆盖
+  dsn: "postgres://quenching:quenching@localhost:5432/quenching?sslmode=disable"
+  max_conns: 20
+
+rabbitmq:
+  # 生产用环境变量 RABBITMQ_URL 覆盖
+  url: "amqp://guest:guest@localhost:5672/"
+
+ai:
+  # ai-service gRPC 地址（Python 服务，LLM_MOCK=true 时本地全链路可离线联调）
+  addr: "127.0.0.1:9000"
+  # 单次复盘 gRPC 兜底超时（Go duration 字符串）。应略大于 ai-service 的
+  # LLM_TIMEOUT（模型调用 300s）：310s。0/缺省时代码内默认同值。
+  call_timeout: "310s"
+
+worker:
+  # T4-16：复盘任务并发消费度。每个消费者独占一个生成器实例并占用一个
+  # Qos 预取额度；按模型网关限流（RPM/TPM）与 Pod 资源调整，默认 4。
+  concurrency: 4
+  # 单任务总超时（取数+LLM+落库），应略大于 ai.call_timeout。
+  task_timeout: "340s"
+  # 重试线性退避基数：第 n 次失败等待 n*backoff_base，仅阻塞当前消费者。
+  backoff_base: "5s"
+
+# 服务间内部接口鉴权（东西向直连，不经网关）。
+# 成长复盘必须配置 token；留空时拒绝读取冻结来源和调用模型。
+internal:
+  token: ""
+
+# training-service 直连地址（复盘输入 + AI 坑点聚合端点，不经网关）。
+# 本地 http://localhost:8086；云上 http://training-service:8086。
+# 留空时启动不报错，但复盘主输入取数会失败（worker 标记任务失败）、坑点章节跳过。
+training_service:
+  base_url: "http://localhost:8086"

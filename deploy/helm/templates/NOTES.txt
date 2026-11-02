@@ -1,0 +1,52 @@
+{{- $root := . -}}
+====================================================================
+  淬火（quenching）平台  Release: {{ .Release.Name }}  Namespace: {{ .Release.Namespace }}
+====================================================================
+
+【0】本 Chart 只负责编排，镜像需先在构建机/服务器构建并推送到仓库：
+      # Go 服务（构建上下文必须是仓库根目录）
+      make images IMAGE_TAG={{ .Values.global.imageTag }}
+      # ai-service 单独构建
+      docker build -f services/ai-service/Dockerfile \
+        -t {{ .Values.global.imageRegistry }}quenching/ai-service:{{ .Values.global.imageTag }} \
+        services/ai-service
+    本地不做依赖下载与构建验证；go mod download / pip install / helm 下载均在上述过程中完成。
+
+【1】中间件默认复用集群内已有实例（external）：
+      PostgreSQL : {{ .Values.postgresql.external.host }}:{{ .Values.postgresql.external.port }}/{{ .Values.postgresql.external.database }}
+      RabbitMQ   : {{ .Values.rabbitmq.external.host }}:{{ .Values.rabbitmq.external.port }}（仅 review-service）
+    若改用本 Chart 自建子 chart，先在服务器执行：
+      helm dependency update
+    并置 postgresql.enabled=true / rabbitmq.enabled=true（external.enabled=false）。
+
+【2】数据库迁移：当前镜像未内置 migrate，migration.enabled=false。
+    首次安装前请用一次性 Job 或在服务器手工执行各服务 migrations/ 下的 SQL。
+
+【3】查看发布状态：
+      kubectl -n {{ .Release.Namespace }} get pods
+      kubectl -n {{ .Release.Namespace }} get svc
+
+【4】访问入口：
+{{- if .Values.ingress.enabled }}
+      HTTP      : http://{{ .Values.ingress.host }}        -> api-gateway:{{ index .Values "services" "api-gateway" "port" }}
+      WebSocket : ws://{{ .Values.ingress.wsHost }}/ws     -> api-gateway:{{ index .Values "services" "api-gateway" "port" }}（g7 起并入）
+{{- else }}
+      Ingress 未启用，端口转发本地验证：
+      kubectl -n {{ .Release.Namespace }} port-forward svc/api-gateway {{ index .Values "services" "api-gateway" "port" }}:{{ index .Values "services" "api-gateway" "port" }}
+{{- end }}
+
+【5】密钥默认值仅用于骨架联调，生产务必覆盖：
+      --set global.jwtSecret=... \
+      --set postgresql.external.password=... \
+      --set rabbitmq.external.password=... \
+      --set observability.wsGatewayApiKey=... \
+      --set ai.llmApiKey=...        # ai.llmMock=false 接真实模型时
+
+【6】真实沙箱（sandbox-service）前置条件：
+      - 镜像已内置 helm CLI 与官方模板目录（/templates，由 go-common/templates 扫描，按 template_slug 部署对应 Chart）
+      - ServiceAccount/sandbox-service 已授予集群 RBAC（见 templates/rbac.yaml）
+      - 沙箱命名空间由服务以 sandbox- 前缀动态创建并隔离
+{{- if not (index .Values "services" "sandbox-service" "enabled") }}
+      （当前 sandbox-service.enabled=false，真实沙箱未部署）
+{{- end }}
+====================================================================

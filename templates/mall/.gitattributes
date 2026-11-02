@@ -1,0 +1,3 @@
+# Preserve imported upstream bytes, including original line endings.
+upstream/mall/** -text
+upstream/mall-app-web/** -text

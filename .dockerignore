@@ -1,0 +1,49 @@
+# Go 服务镜像以仓库根为构建上下文（go.mod replace 指向 packages/*）。
+# COPY 只取本服务 + packages/{go-common,proto}，这里仅用于减小发送给 daemon 的上下文体积。
+**/.git
+**/.gitignore
+**/.dockerignore
+
+# 构建产物 / 依赖
+**/node_modules/
+**/dist/
+**/build/
+**/bin/
+**/*.exe
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/.venv/
+**/venv/
+**/vendor/
+
+# 环境与密钥
+**/.env
+**/.env.local
+**/*.local
+
+# IDE / 系统 / 日志
+**/.idea/
+**/.vscode/
+**/*.swp
+**/.DS_Store
+**/Thumbs.db
+**/*.log
+/logs/
+/output/
+/.superpowers/
+/.install-tmp/
+
+# 与服务构建无关的目录（前端以仓库根为上下文构建 apps/web、apps/admin，
+# 依赖 packages/shared，故 apps/ 与 packages/shared 不可排除）。
+# templates/ 下官方模板目录整体随镜像分发（template.yaml 清单 + chart 等运行时文件），
+# 并保留 README.md 作为锚文件，保证 templates/ 暂无模板时 COPY 也不会因源目录为空而失败。
+# dockerignore 例外规则不能越级：先排除直接子项，再放行全部模板子目录；
+# 目录放行后其下深层路径未被任何排除规则匹配，默认随上下文发送。
+# 模板目录请保持精简；catalog-assets 仅保留页面所需的小型展示封面，勿放入调研截图等大文件。
+templates/*
+!templates/README.md
+!templates/*/
+docs/
+scripts/
+services/ai-service/

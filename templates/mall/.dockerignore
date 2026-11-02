@@ -1,0 +1,8 @@
+**/.git
+**/node_modules
+**/target
+**/dist
+upstream/mall/document/*
+!upstream/mall/document/sql/
+helm/
+scripts/

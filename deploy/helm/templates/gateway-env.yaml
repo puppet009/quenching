@@ -1,0 +1,20 @@
+{{/* 纯环境变量网关：api-gateway 的非密钥 env（g7 起 ws-gateway 已并入）。
+     JWT_SECRET 与 ROUTE_N 在 Deployment 中单独注入（密钥引用），此处只放普通配置。 */}}
+{{- $root := . -}}
+{{- range $name := list "api-gateway" }}
+{{- $s := index $root.Values.services $name }}
+{{- if $s.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-env
+  labels:
+    {{- include "quenching.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+data:
+  {{- range $k, $v := $s.env }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}
+{{- end }}

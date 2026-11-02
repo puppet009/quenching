@@ -1,0 +1,120 @@
+# golangci-lint 配置。关键护栏：depguard 禁止服务间互引 internal，
+# 强制跨服务只能依赖 go-common / proto，保证未来可拆分为微服务。
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - goimports
+    - errcheck
+    - ineffassign
+    - unused
+    - depguard
+
+linters-settings:
+  depguard:
+    # 规则按“文件归属服务”匹配：每个服务的源码只 deny 其余六个服务，
+    # 从而放行“引用自身 internal”以及公共包 go-common / proto。
+    # depguard 的 pkg 按前缀匹配，故 deny 某服务前缀会连带拦截其 internal 子包。
+    rules:
+      user-no-cross:
+        files: ["**/services/user-service/**"]
+        deny: &deny-others
+          - pkg: "github.com/quenching/api-gateway"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/content-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/sandbox-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/training-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/fault-engine"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/review-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+      content-no-cross:
+        files: ["**/services/content-service/**"]
+        deny:
+          - pkg: "github.com/quenching/api-gateway"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/user-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/sandbox-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/training-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/fault-engine"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/review-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+      sandbox-no-cross:
+        files: ["**/services/sandbox-service/**"]
+        deny:
+          - pkg: "github.com/quenching/api-gateway"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/user-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/content-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/training-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/fault-engine"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/review-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+      training-no-cross:
+        files: ["**/services/training-service/**"]
+        deny:
+          - pkg: "github.com/quenching/api-gateway"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/user-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/content-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/sandbox-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/fault-engine"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/review-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+      fault-no-cross:
+        files: ["**/services/fault-engine/**"]
+        deny:
+          - pkg: "github.com/quenching/api-gateway"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/user-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/content-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/sandbox-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/training-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/review-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+      review-no-cross:
+        files: ["**/services/review-service/**"]
+        deny:
+          - pkg: "github.com/quenching/api-gateway"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/user-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/content-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/sandbox-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/training-service"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+          - pkg: "github.com/quenching/fault-engine"
+            desc: "禁止跨服务引用，公共能力放 go-common，契约走 proto"
+      gateway-no-cross:
+        files: ["**/services/api-gateway/**"]
+        deny: *deny-others
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck

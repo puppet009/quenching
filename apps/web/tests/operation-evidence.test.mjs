@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import test from 'node:test';
+import ts from 'typescript';
+const code=await readFile(new URL('../src/services/operationState.ts',import.meta.url),'utf8');
+const out=ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {OperationScope,CommandSubmission,operationStatus,coverageReasons}=await import('data:text/javascript;base64,'+Buffer.from(out).toString('base64'));
+test('managedCommandKeySurvivesRetry',()=>{const s=new CommandSubmission(()=>`key-${++n}`);let n=0;const first=s.begin();assert.equal(s.begin(),first);s.newExecution();assert.notEqual(s.begin(),first)});
+test('unknownIsNotExitZero',()=>{assert.match(operationStatus({status:'unknown',exit_code:null}),/未知/);assert.doesNotMatch(operationStatus({status:'unknown',exit_code:null}),/0/)});
+test('lateOperationDoesNotEnterNextSession',()=>{const s=new OperationScope();const a=s.begin(7);const b=s.begin(8);assert.equal(s.current(a),false);assert.equal(a.signal.aborted,true);assert.equal(s.current(b),true)});
+test('legacyCoverageIsUnknown',()=>{assert.deepEqual(coverageReasons(undefined),['legacy_coverage_unknown'])});

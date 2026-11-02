@@ -1,0 +1,23 @@
+# ai-service 独立构建上下文（services/ai-service）专用。
+.git
+.gitignore
+.dockerignore
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+.env
+.env.local
+*.local
+
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+*.log
+
+tests/

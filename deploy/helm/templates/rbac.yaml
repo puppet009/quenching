@@ -1,0 +1,175 @@
+{{/* sandbox-service 真实沙箱（InCluster）所需身份与权限。
+   代码侧实际调用（services/sandbox-service/internal/k8s）：
+     - core/v1  namespaces: list/get/create/delete（集群作用域）
+     - core/v1  nodes / pods: list（跨命名空间，用于资源水位与异常 Pod 巡检）
+     - core/v1  resourcequotas: create（随沙箱 Namespace 一起建）
+     - networking.k8s.io/v1 networkpolicies: create
+     - apps/v1  deployments: list（就绪等待 / 进度追踪）
+   另通过 exec helm CLI 在沙箱命名空间内 install/uninstall 沙箱 Chart，
+   沙箱 Chart 会创建 Deployment/Service/ConfigMap/Secret/PVC 等任意资源。
+   基础资源管理沿用平台控制器的集群绑定；终端 exec 单独使用未全局绑定的
+   ClusterRole 模板，在每班次命名空间中动态 RoleBinding，结束时撤销。 */}}
+{{- if (index .Values "services" "sandbox-service" "enabled") }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sandbox-service
+  labels:
+    {{- include "quenching.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-service
+---
+# 集群作用域资源：Namespace / Node。RBAC 无法按名称前缀收窄，
+# 沙箱 Namespace 由 provisioner 统一使用 sandbox- 前缀（约定层隔离）。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "quenching.fullname" . }}-sandbox-cluster
+  labels:
+    {{- include "quenching.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-service
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["list", "get", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list", "get", "patch", "update", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list"]
+  - apiGroups: ["autoscaling.k8s.io"]
+    resources: ["verticalpodautoscalers"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "quenching.fullname" . }}-sandbox-cluster
+  labels:
+    {{- include "quenching.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-service
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-service
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "quenching.fullname" . }}-sandbox-cluster
+  apiGroup: rbac.authorization.k8s.io
+---
+# 沙箱命名空间内：巡检 + helm install/uninstall 所需的全量资源操作。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "quenching.fullname" . }}-sandbox-ns
+  labels:
+    {{- include "quenching.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-service
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "resourcequotas", "services", "configmaps", "secrets", "persistentvolumeclaims", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Only delegate binding of this exact exec template. Effective exec access is
+  # granted by a namespace RoleBinding, created/revoked with each training.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: [{{ printf "%s-sandbox-terminal" (include "quenching.fullname" .) | quote }}]
+    verbs: ["bind"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    resourceNames: ["sandbox-project-access"]
+    verbs: ["get", "update"]
+  {{- if .Values.faultExecution.enabled }}
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "create", "update"]
+  {{- end }}
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# 绑定在集群范围内生效。RBAC 无法按 sandbox-* 前缀限定命名空间；
+# MVP 取舍：沙箱命名空间由 provisioner 统一加 sandbox- 前缀隔离，
+# 此绑定只包含基础资源管理和指定模板的绑定管理，不包含 pods/exec。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "quenching.fullname" . }}-sandbox-ns
+  labels:
+    {{- include "quenching.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-service
+subjects:
+  - kind: ServiceAccount
+    name: sandbox-service
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "quenching.fullname" . }}-sandbox-ns
+  apiGroup: rbac.authorization.k8s.io
+---
+# Permission template only: NEVER ClusterRoleBind this role. Each live sandbox
+# references it with a RoleBinding inside its own namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "quenching.fullname" . }}-sandbox-terminal
+  labels:
+    {{- include "quenching.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-service
+rules:
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+{{- end }}
+
+{{- if and .Values.faultExecution.enabled (index .Values.services "fault-engine" "enabled") }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fault-engine
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "quenching.fullname" . }}-fault-agent
+  namespace: {{ .Values.faultExecution.agentNamespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: [{{ .Values.faultExecution.operatorName | quote }}]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "quenching.fullname" . }}-fault-agent
+  namespace: {{ .Values.faultExecution.agentNamespace }}
+subjects:
+  - kind: ServiceAccount
+    name: fault-engine
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "quenching.fullname" . }}-fault-agent
+{{- end }}

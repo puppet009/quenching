@@ -1,0 +1,50 @@
+server:
+  addr: ":8088"
+  mode: "debug"
+
+content_service:
+  base_url: "http://localhost:8082"
+sandbox_service:
+  base_url: "http://localhost:8089"
+
+log:
+  level: "info"
+  dir: ""         # 落盘目录，空=仅 stdout；集群由 Helm 注入
+
+db:
+  dsn: "postgres://quenching:quenching@localhost:5432/quenching?sslmode=disable"
+  max_conns: 20
+
+# ChaosBlade 执行通道（T1-26/27）：fault-engine 通过 kubectl exec 进
+# DaemonSet agent Pod 执行 blade CLI。容器内部署（推荐）时 kubeconfig 留空，
+# 使用 Pod 服务账号默认凭证。
+chaos:
+  kubectl_path: "kubectl"
+  kubeconfig: ""
+  agent_namespace: "chaos"
+  agent_pod_selector: "app=chaosblade-agent"
+  container: "chaosblade"
+  blade_path: "/opt/chaosblade/blade"
+
+# Prometheus 指标源：Supervisor 按周期做 PromQL 瞬时查询。
+# metric_queries 是“逻辑指标名 -> PromQL”的映射，模板变量 {{namespace}}
+# 会被替换为目标命名空间；未配置映射的逻辑指标退化为裸指标查询。
+prometheus:
+  url: "http://prometheus-k8s.monitoring.svc:9090"
+  # 示例（云上按实际指标名补齐/修改）：
+  metric_queries:
+    cpu_usage: 'avg(rate(container_cpu_usage_seconds_total{namespace="{{namespace}}",container!="",image!=""}[1m])) by (pod)'
+    mem_usage: 'avg(container_memory_working_set_bytes{namespace="{{namespace}}",container!=""}) by (pod)'
+    error_rate: 'sum(rate(http_requests_total{namespace="{{namespace}}",code=~"5.."}[1m])) by (service)'
+
+# 服务间内部接口（/internal/v1）。
+# token 为东西向调用的共享密钥：留空时不校验请求头（本地开发 / 仅靠网络层隔离），
+# 云上建议显式配置，调用方在 X-Internal-Token 头携带相同值。
+internal:
+  token: ""
+
+# 运行时编排参数。
+runtime:
+  default_namespace: ""        # 请求未携带 namespace 时的兜底命名空间（建议显式配置为实训沙箱命名空间）
+  poll_interval_seconds: 5     # 指标轮询周期
+  stable_required_seconds: 30  # 修复判定稳定窗口

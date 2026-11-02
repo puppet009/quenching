@@ -1,0 +1,17 @@
+Quenching（淬火）
+Copyright 2026 Quenching contributors
+
+Platform-authored code and documentation are licensed under Apache-2.0.
+Third-party code and assets retain their original copyright and license notices.
+
+This repository includes fixed source snapshots of:
+- mall, by macrozheng: https://github.com/macrozheng/mall
+  License: templates/mall/upstream/mall/LICENSE
+- mall-app-web, by macrozheng: https://github.com/macrozheng/mall-app-web
+  License: templates/mall/upstream/mall-app-web/LICENSE.txt
+
+Fixed commits and platform adaptations are recorded in templates/mall/SOURCE.md
+and templates/mall/upstream/*.source.json. The mall catalog cover retains its
+source and attribution record in templates/mall/catalog-assets/NOTICE.md.
+Third-party names, trademarks, and demonstration content belong to their
+respective holders. These notices do not imply endorsement by those holders.

@@ -1,0 +1,97 @@
+# ============================================================================
+# 前端：web 用户端 30080 / admin 管理端 30081
+# 镜像由 images.sh 构建为 quenching/web:0.1.0-alpha.1、quenching/admin:0.1.0-alpha.1
+# ============================================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: web
+    spec:
+      priorityClassName: quenching-platform
+      containers:
+        - name: web
+          image: quenching/web:0.1.0-alpha.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: TZ, value: Asia/Shanghai}
+          ports:
+            - { name: http, containerPort: 80 }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "20m", memory: "32Mi" }
+            limits: { cpu: "300m", memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: platform
+spec:
+  # 单机用 NodePort：直接在节点 IP 上监听 30080，无需 ServiceLB（LoadBalancer
+  # 会与 svclb-traefik 抢主机 80 端口导致 svclb Pod Pending）。
+  type: NodePort
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: web
+  ports:
+    - { name: http, port: 80, targetPort: 80, nodePort: 30080, protocol: TCP }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin
+  namespace: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: admin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: admin
+    spec:
+      priorityClassName: quenching-platform
+      containers:
+        - name: admin
+          image: quenching/admin:0.1.0-alpha.1
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: TZ, value: Asia/Shanghai}
+          ports:
+            - { name: http, containerPort: 80 }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "20m", memory: "32Mi" }
+            limits: { cpu: "300m", memory: "128Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin
+  namespace: platform
+spec:
+  # 同 web：NodePort 30081，避免与 svclb-traefik 抢主机 80 端口。
+  type: NodePort
+  externalTrafficPolicy: Cluster
+  selector:
+    app.kubernetes.io/name: admin
+  ports:
+    - { name: http, port: 80, targetPort: 80, nodePort: 30081, protocol: TCP }

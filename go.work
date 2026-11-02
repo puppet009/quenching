@@ -1,0 +1,15 @@
+go 1.27
+
+// 仅列出已含 go.mod 的模块；其余服务在初始化时加入：
+//   go work use ./services/<service>
+use (
+	./packages/go-common
+	./packages/proto
+	./services/api-gateway
+	./services/content-service
+	./services/fault-engine
+	./services/review-service
+	./services/sandbox-service
+	./services/training-service
+	./services/user-service
+)

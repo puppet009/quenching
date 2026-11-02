@@ -1,0 +1,76 @@
+apiVersion: quenching/v1
+slug: mall
+name: mall 电商（接入验证）
+domain: ecommerce
+description: >-
+  真实开源 mall 商城的加载验证模板，包含 H5 前台、portal 和沙箱内业务依赖。
+  当前用于部署接入验收，支付入口关闭，尚未接入模拟用户和故障，不代表正式实训已验收。
+difficulty: medium
+tech_stack: [Java 17, Spring Boot, MySQL, Redis, RabbitMQ, MongoDB, Vue]
+chart: helm
+sort_order: 100
+enabled: true
+services:
+  - name: frontend
+    # Editable source/runtime use one per-class RWO workspace.
+    elastic: {max_replicas: 1}
+    resources:
+      requests: {cpu: "100m", memory: "1Gi"}
+      limits: {cpu: "500m", memory: "1Gi"}
+    workload: frontend
+    port: 80
+    role: business
+  - name: mall-portal
+    elastic: {max_replicas: 1}
+    resources:
+      requests: {cpu: "100m", memory: "768Mi"}
+      limits: {cpu: "700m", memory: "768Mi"}
+    workload: mall-portal
+    port: 8085
+    role: business
+  - name: mysql
+    resources:
+      requests: {cpu: "100m", memory: "256Mi"}
+      limits: {cpu: "400m", memory: "512Mi"}
+    workload: mysql
+    port: 3306
+    role: middleware
+  - name: redis
+    resources:
+      requests: {cpu: "25m", memory: "32Mi"}
+      limits: {cpu: "100m", memory: "128Mi"}
+    workload: redis
+    port: 6379
+    role: middleware
+  - name: rabbitmq
+    resources:
+      requests: {cpu: "50m", memory: "128Mi"}
+      limits: {cpu: "300m", memory: "512Mi"}
+    workload: rabbitmq
+    port: 5672
+    role: middleware
+  - name: mongo
+    resources:
+      requests: {cpu: "50m", memory: "256Mi"}
+      limits: {cpu: "300m", memory: "768Mi"}
+    workload: mongo
+    port: 27017
+    role: middleware
+images:
+  - name: frontend
+    context: .
+    dockerfile: docker/frontend.Dockerfile
+  - name: mall-portal
+    context: .
+    dockerfile: docker/portal.Dockerfile
+  - name: mysql
+    context: .
+    dockerfile: docker/mysql.Dockerfile
+resources:
+  requests: {cpu: "425m", memory: "2464Mi"}
+  storage: "5504Mi"
+  cpu: "3"
+  memory: 4Gi
+
+# Platform-owned command engine; template only maps business protocol.
+behavior_protocol_file: adaptation/behavior-protocol.json

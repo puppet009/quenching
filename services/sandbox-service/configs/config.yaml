@@ -1,0 +1,54 @@
+server:
+  addr: ":8089"
+  mode: "debug"
+
+log:
+  level: "info"
+  dir: ""         # 落盘目录，空=仅 stdout；集群由 Helm 注入
+
+# 服务间内部接口鉴权（东西向直连，不经网关）。
+# 留空则不携带 X-Internal-API-Key，与 training-service 本地留空放行对应；
+# 云上须与 training-service internal.token 保持一致。
+internal:
+  token: ""
+
+db:
+  dsn: "postgres://quenching:quenching@localhost:5432/quenching?sslmode=disable"
+  max_conns: 20
+
+sandbox:
+  # kubeconfig 为空时本地进程级联调走 client-go fake clientset（内存存储），
+  # 只落 DB 记录、不触达真实集群；云上 k3s 填实际路径或留空走 InCluster。
+  # 环境变量覆盖：SANDBOX_KUBECONFIG（viper 自动映射 sandbox.kubeconfig）。
+  kubeconfig: ""
+  # 与已安装 Helm release 的权限模板名称一致；Helm 部署自动渲染此值。
+  terminal_cluster_role: "quenching-quenching-sandbox-terminal"
+
+templates:
+  # 官方预置模板根目录；生产镜像内为 /templates（见 Dockerfile ENV TEMPLATES_ROOT）。
+  root: "../../../templates"
+
+behavior:
+  command_base_url: "http://sandbox-service:8089"
+  # 行为模拟信号汇聚端点。runner 采集到的页面错误/步骤失败信号发往此地址；
+  # 留空时 runner 只本地打印信号（第一批本地降级），第二批接入汇聚服务。
+  # 环境变量覆盖：BEHAVIOR_SIGNAL_ENDPOINT（viper 自动映射）。
+  signal_endpoint: ""
+
+# training-service 告警引擎地址（第三批）。
+# 配置后：沙箱就绪时幂等注册 11 条默认告警规则，前端信号异步转发到告警引擎；
+# 留空则不转发、不注册（本地 fake 降级，绝不产生假信号）。
+# 环境变量覆盖：TRAINING_SERVICE_BASE_URL（viper 自动映射）。
+training_service:
+  base_url: ""               # 本地联调填 http://localhost:8086；云上 http://training-service:8086
+
+# review-service 服务端埋点地址（沙箱就绪上报 first_start）。
+# 留空则不埋点；本地联调填 http://localhost:8087，云上 http://review-service:8087。
+review_service:
+  base_url: ""
+
+resources:
+  platform_namespace: "platform"
+  admin_profile_url: "http://localhost:8085/api/v1/admin/profile"
+auth:
+  jwt_secret: ""

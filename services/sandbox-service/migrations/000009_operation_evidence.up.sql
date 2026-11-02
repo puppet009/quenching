@@ -1,0 +1,8 @@
+CREATE TABLE sandbox_operation_audit_sessions(session_id BIGINT PRIMARY KEY, sealed BOOLEAN NOT NULL DEFAULT false, seal_state TEXT NOT NULL DEFAULT 'open', deadline TIMESTAMPTZ, watermark BIGINT NOT NULL DEFAULT 0, gaps JSONB NOT NULL DEFAULT '[]');
+CREATE TABLE sandbox_operation_intents(operation_id TEXT PRIMARY KEY,session_id BIGINT NOT NULL,request_key TEXT NOT NULL,request_hash TEXT NOT NULL,evidence JSONB NOT NULL,revision BIGINT NOT NULL DEFAULT 1,cancel_requested BOOLEAN NOT NULL DEFAULT false,owner TEXT NOT NULL DEFAULT '',lease_until TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),UNIQUE(session_id,request_key));
+CREATE TABLE sandbox_operation_events(id BIGSERIAL PRIMARY KEY,event_id TEXT UNIQUE NOT NULL,operation_id TEXT NOT NULL REFERENCES sandbox_operation_intents(operation_id),session_id BIGINT NOT NULL,sequence BIGINT NOT NULL,evidence JSONB NOT NULL,delivery JSONB NOT NULL,delivered BOOLEAN NOT NULL DEFAULT false,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),UNIQUE(operation_id,sequence));
+CREATE INDEX sandbox_operation_events_pending ON sandbox_operation_events(id) WHERE NOT delivered;
+CREATE INDEX sandbox_operation_events_history ON sandbox_operation_events(session_id,id);
+CREATE TABLE sandbox_operation_texts(ref TEXT PRIMARY KEY,operation_id TEXT NOT NULL REFERENCES sandbox_operation_intents(operation_id),session_id BIGINT NOT NULL,body JSONB NOT NULL);
+CREATE TABLE sandbox_operation_reply_links(operation_id TEXT PRIMARY KEY REFERENCES sandbox_operation_intents(operation_id),reply_message_id BIGINT NOT NULL);
+CREATE TABLE sandbox_operation_remote_seals(session_id BIGINT PRIMARY KEY,seal JSONB NOT NULL);

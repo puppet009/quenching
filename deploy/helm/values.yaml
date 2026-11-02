@@ -1,0 +1,223 @@
+# ============================================================================
+# 淬火平台 Helm values（MVP 骨架）
+# 约定：
+#   - 7 个 Go 服务监听容器端口 8080/8082/8085-8089；ai-service 8000(HTTP)+9000(gRPC)
+#   - yaml 类服务的配置经 ConfigMap 挂载到 /app/configs/config.yaml
+#   - api-gateway 只用环境变量（g7 起 /ws 与 /api/v1/events 并入同进程）
+#   - 中间件默认指向集群内 Service DNS，可用 *.external.* 复用已有实例
+# 本地只写模板；实际渲染/安装与参数在服务器执行。
+# ============================================================================
+
+global:
+  imageRegistry: ""                 # 私服前缀，如 registry.example.com/
+  imageTag: "0.1.0-alpha.1"
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+  namespace: quenching
+  jwtSecret: "change-me-in-prod"    # api-gateway 使用（g7 起含 /ws 鉴权）
+  # go-yaml 服务间内部接口共享密钥（X-Internal-Token / X-Internal-API-Key）。
+  internalToken: "change-me-internal-token"
+  ginMode: "release"                # 注入 yaml 服务 server.mode
+  timezone: "Asia/Shanghai"          # 日志与日期目录使用的时区
+
+# ---------------------------------------------------------------------------
+# 日志持久化：后端同时写 stdout 和文件，按服务/日期/Pod 区分。
+# 单机部署使用仓库 logs 的 hostPath；hostPath 为空时使用 PVC。
+# 应用按本地日期切换目录，并按文件大小轮转。
+# 默认 stdout，避免共享 RWO 卷将平台服务绑定到同一节点。
+# 多节点集中存储可配置 RWX PVC；hostPath 日志分别保留在各节点。
+# 关闭挂载或切换 hostPath 时保留已有 PVC。
+# ---------------------------------------------------------------------------
+logging:
+  collector:
+    enabled: false                 # 单机 values 启用，补齐 NGINX/基础设施容器日志
+  persistence:
+    enabled: false
+    hostPath: ""                    # 非空时挂载节点目录；空时使用下方 PVC
+    size: 10Gi
+    storageClass: ""                # 空=用集群默认 StorageClass
+    accessMode: ReadWriteOnce
+  dir: "/var/log/quenching"         # 容器内挂载路径，同时注入 log.dir / LOG_DIR
+
+
+# ---------------------------------------------------------------------------
+# 中间件：默认复用集群内已有实例（external.enabled=true 直连给定地址）。
+# 想让本 Chart 自建，置 external.enabled=false 且对应 enabled=true，并先
+# helm dependency update（拉取 bitnami 子 chart）。
+# ---------------------------------------------------------------------------
+postgresql:
+  enabled: false                    # 自建子 chart 开关
+  external:
+    enabled: true
+    host: "postgresql"
+    port: 5432
+    database: "quenching"
+    username: "quenching"
+    password: "quenching"
+  # 自建时透传给 bitnami/postgresql 的最小参数（external.enabled=false 生效）
+  auth:
+    database: quenching
+    username: quenching
+    password: quenching
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+
+rabbitmq:
+  enabled: false
+  external:
+    enabled: true
+    host: "rabbitmq"
+    port: 5672
+    username: "guest"
+    password: "guest"
+  auth:
+    username: guest
+    password: guest
+
+redis:
+  enabled: false                    # 当前无服务连接，预留
+  external:
+    enabled: true
+    host: "redis"
+    port: 6379
+
+# ai-service 与可观测地址（供 ConfigMap 渲染）
+ai:
+  # ai-service 的 gRPC Service DNS（Go 服务 ai.addr）
+  grpcAddr: "ai-service:9000"
+  llmMock: "false"                  # 生产仅真实 Qwen；开发测试显式启用 mock
+  llmApiKey: ""
+  # T4-16：qwen3.8-flash 走 OpenAI 兼容协议；按实际网关地址/模型 ID 覆盖。
+  llmProvider: "qwen"
+  llmBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode"
+  llmModel: "qwen3.8-flash"
+  llmMemoryTimeout: "60"             # 班次记忆整理，非thinking
+  llmTimeout: "300"                 # 单次调用读超时秒数；超时不重试
+  llmMaxRetries: "3"                # 仅连接错误/429/5xx 等快速失败重试（总尝试次数）
+observability:
+  prometheusUrl: "http://prometheus-server:9090"
+  lokiUrl: ""
+  wsGatewayApiKey: "change-me-internal-api-key"
+  releaseName: "sandbox"            # 沙箱 Helm release 前缀
+
+# ---------------------------------------------------------------------------
+# 平台服务：每个 Go 服务一条。enabled=false 可不部署；
+# config 段非空时生成 ConfigMap 并挂载（yaml 类服务）。
+# ---------------------------------------------------------------------------
+services:
+
+  api-gateway:
+    enabled: true
+    port: 8080
+    replicas: 2
+    # 纯环境变量；路由默认表内置指向 localhost，云上必须用 ROUTE_N 整表覆盖。
+    # 模板按下方 routes 生成 ROUTE_0..N（服务 DNS 由 helpers 解析）。
+    useClusterRoutes: true
+    env:
+      GATEWAY_ADDR: ":8080"
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_RATE: "10"
+      RATE_LIMIT_BURST: "30"
+      # g7：WebSocket 允许来源（/ws）；WS_INTERNAL_API_KEY 在 deployment 中由 observability.wsGatewayApiKey 注入
+      WS_ALLOW_ORIGINS: "*"
+    resources:
+      requests: {cpu: "100m", memory: "128Mi"}
+      limits: {cpu: "500m", memory: "256Mi"}
+
+  content-service:
+    enabled: true
+    port: 8082
+    replicas: 1
+    config: true
+    resources:
+      requests: {cpu: "50m", memory: "64Mi"}
+      limits: {cpu: "500m", memory: "256Mi"}
+
+  user-service:
+    enabled: true
+    port: 8085
+    replicas: 1
+    config: true
+    # MVP 无短信服务：手机号/邮箱均使用账号密码注册，账号归属未经验证。
+    # 接入真实 SMSService 后才开启；此开关只约束手机号注册。
+    registrationSMSRequired: false
+    resources:
+      requests: {cpu: "50m", memory: "64Mi"}
+      limits: {cpu: "500m", memory: "256Mi"}
+
+  training-service:
+    enabled: true
+    port: 8086
+    replicas: 1
+    config: true
+    resources:
+      requests: {cpu: "100m", memory: "128Mi"}
+      limits: {cpu: "1", memory: "512Mi"}
+
+  review-service:
+    workerTaskTimeout: "340s"
+    enabled: true
+    port: 8087
+    replicas: 1
+    config: true
+    resources:
+      requests: {cpu: "100m", memory: "128Mi"}
+      limits: {cpu: "1", memory: "512Mi"}
+
+  fault-engine:
+    enabled: true
+    port: 8088
+    replicas: 1
+    config: true
+    resources:
+      requests: {cpu: "50m", memory: "64Mi"}
+      limits: {cpu: "500m", memory: "256Mi"}
+
+  sandbox-service:
+    enabled: true
+    port: 8089
+    replicas: 1
+    config: true
+    # 云上真实沙箱：InCluster 时留空，或用挂载的 kubeconfig。
+    kubeconfigPath: ""
+    resources:
+      requests: {cpu: "100m", memory: "128Mi"}
+      limits: {cpu: "1", memory: "512Mi"}
+
+  ai-service:
+    enabled: true
+    httpPort: 8000
+    grpcPort: 9000
+    replicas: 1
+    resources:
+      requests: {cpu: "200m", memory: "256Mi"}
+      limits: {cpu: "1", memory: "512Mi"}
+
+# ---------------------------------------------------------------------------
+# Ingress：仅暴露 api-gateway（HTTP 与 WebSocket /ws，g7 起同进程）。
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: nginx
+  host: api.quenching.local
+  wsHost: ws.quenching.local
+  tls:
+    enabled: false
+    secretName: quenching-tls
+
+# 数据库迁移（helm pre-install/upgrade Job，需镜像内含 migrate）
+# MVP 骨架默认关闭：当前 Go 镜像未打包 migrate 二进制，迁移先用一次性 Job/手工执行。
+migration:
+  enabled: false
+  image: "migrate/migrate:v4.17.1"
+
+# ChaosBlade must already be installed and accepted on the server.
+faultExecution:
+  enabled: false
+  agentNamespace: chaos
+  operatorName: chaosblade-operator
+  agentPodSelector: app=chaosblade-agent
+  container: chaosblade
+  bladePath: /opt/chaosblade/blade

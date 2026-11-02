@@ -1,0 +1,148 @@
+{{/* 为每个 go-yaml 服务生成 config.yaml（挂载到 /app/configs/config.yaml）。
+     与各服务 configs/config.yaml 的键保持一致；中间件地址取 values 的集群 DNS。 */}}
+{{- define "quenching.renderConfig" -}}
+{{- $root := index . 0 -}}
+{{- $name := index . 1 -}}
+server:
+  addr: ":{{ (index $root.Values.services $name).port }}"
+  mode: {{ $root.Values.global.ginMode | quote }}
+log:
+  level: "info"
+  {{- if eq (include "quenching.logEnabled" $root) "true" }}
+  dir: {{ include "quenching.logDir" $root | quote }}
+  {{- end }}
+db:
+  dsn: {{ include "quenching.dbDsn" $root | quote }}
+{{- if ne $name "user-service" }}
+  max_conns: 20
+{{- end }}
+# 服务间内部接口共享密钥（X-Internal-Token / X-Internal-API-Key）。
+internal:
+  token: {{ $root.Values.global.internalToken | quote }}
+{{- if eq $name "user-service" }}
+auth:
+  registration_sms_required: {{ index $root.Values.services "user-service" "registrationSMSRequired" }}
+{{- end }}
+{{- if or (eq $name "user-service") (eq $name "sandbox-service") }}
+# 服务端埋点上报（注册/沙箱就绪）直连 review-service 内部端点。
+review_service:
+  base_url: "http://review-service:{{ (index $root.Values.services "review-service" "port") }}"
+{{- end }}
+{{- if eq $name "fault-engine" }}
+chaos:
+  enabled: {{ $root.Values.faultExecution.enabled }}
+  agent_namespace: {{ $root.Values.faultExecution.agentNamespace | quote }}
+  operator_name: {{ $root.Values.faultExecution.operatorName | quote }}
+  agent_pod_selector: {{ $root.Values.faultExecution.agentPodSelector | quote }}
+  container: {{ $root.Values.faultExecution.container | quote }}
+  blade_path: {{ $root.Values.faultExecution.bladePath | quote }}
+content_service:
+  base_url: "http://content-service:{{ (index $root.Values.services "content-service" "port") }}"
+sandbox_service:
+  base_url: "http://sandbox-service:{{ (index $root.Values.services "sandbox-service" "port") }}"
+{{- end }}
+{{- if eq $name "review-service" }}
+rabbitmq:
+  url: {{ include "quenching.amqpUrl" $root | quote }}
+ai:
+  addr: {{ $root.Values.ai.grpcAddr | quote }}
+  # T4-16：gRPC 兜底 310s，略大于 Python 侧模型 300s，让模型超时先返回。
+  call_timeout: "310s"
+worker:
+  # 复盘生成并发度（RabbitMQ Qos prefetch 同值）；按模型网关 RPM/TPM 实测调整。
+  concurrency: 4
+  # 单任务硬超时 320s > gRPC 310s > 模型 300s。
+  task_timeout: "320s"
+  # 失败重排队后的线性退避基数：第 n 次重试等待 n*base。
+  backoff_base: "5s"
+{{- end }}
+{{- if eq $name "training-service" }}
+ai:
+  addr: {{ $root.Values.ai.grpcAddr | quote }}
+  model: "qwen3.8-flash"
+  prompt_version: "training_assistant:v1"
+# 跨服务直连地址（东西向流量，不经网关）。user_service 缺失会导致交叉分组
+# 无法落库，创建实训会话直接失败（fail-fast）。
+fault_engine:
+  base_url: "http://fault-engine:{{ (index $root.Values.services "fault-engine" "port") }}"
+  default_namespace: {{ $root.Values.global.namespace | quote }}
+content_service:
+  base_url: "http://content-service:{{ (index $root.Values.services "content-service" "port") }}"
+user_service:
+  base_url: "http://user-service:{{ (index $root.Values.services "user-service" "port") }}"
+review_service:
+  base_url: "http://review-service:{{ (index $root.Values.services "review-service" "port") }}"
+# 班次活跃度续租/结束回收沙箱、以及只读诊断观察工具都依赖此地址；缺省时静默降级
+# （沙箱只按创建时间的兜底租期回收，弃班无法即时腾出并发槽位）。
+sandbox_service:
+  base_url: "http://sandbox-service:{{ (index $root.Values.services "sandbox-service" "port") }}"
+observability:
+  prometheus_url: {{ $root.Values.observability.prometheusUrl | quote }}
+  loki_url: {{ $root.Values.observability.lokiUrl | quote }}
+  namespace: {{ $root.Values.global.namespace | quote }}
+  release_name: {{ $root.Values.observability.releaseName | quote }}
+  # g7：ws-gateway 已并入 api-gateway，事件接口走 api-gateway 同服务
+  ws_gateway_url: "http://api-gateway:{{ (index $root.Values "services" "api-gateway" "port") }}"
+  ws_gateway_api_key: {{ $root.Values.observability.wsGatewayApiKey | quote }}
+# T3-6：训练会话卡顿检测（纯规则、内存态，不建表/不推送/不频控；配 0 或缺省回落代码内置默认值）。
+stall:
+  scan_interval_ms: 30000
+  idle_timeout_ms: 300000
+  # R3 弃班：连续空闲超过 20 分钟 → 班次按未完成结束、回收沙箱、触发未完成复盘。
+  abandon_timeout_ms: 1200000
+  progress_window_ms: 600000
+  min_activities: 2
+  min_segment_points: 2
+  min_error_rate_drop: 1.0
+  min_p99_drop: 0.05
+  min_qps_relative_gain: 0.10
+  min_qps_absolute_gain: 1.0
+# T3-7：卡顿主动线索推送（确定性提问式文案，不泄露根因；ws-gateway 不可用时仅落库）。
+clue:
+  enabled: true
+  persist_timeout_ms: 10000
+  publish_timeout_ms: 5000
+{{- end }}
+{{- if eq $name "sandbox-service" }}
+fault_execution:
+  enabled: {{ $root.Values.faultExecution.enabled }}
+  platform_namespace: {{ $root.Release.Namespace | quote }}
+behavior:
+  command_base_url: "http://sandbox-service:{{ (index $root.Values.services "sandbox-service" "port") }}"
+resources:
+  platform_namespace: {{ $root.Release.Namespace | quote }}
+  admin_profile_url: "http://user-service:{{ (index $root.Values.services "user-service" "port") }}/api/v1/admin/profile"
+sandbox:
+  terminal_cluster_role: {{ printf "%s-sandbox-terminal" (include "quenching.fullname" $root) | quote }}
+  # 空字符串：集群内走 InCluster 配置（需对应 RBAC）；也可挂 kubeconfig 后填路径。
+  kubeconfig: {{ (index $root.Values.services $name).kubeconfigPath | quote }}
+# 行为模拟信号与告警规则注册均指向 training-service（training 侧同 token 校验）。
+training_service:
+  base_url: "http://training-service:{{ (index $root.Values.services "training-service" "port") }}"
+{{- end }}
+{{- if eq $name "content-service" }}
+fault_engine:
+  base_url: "http://fault-engine:{{ (index $root.Values.services "fault-engine" "port") }}"
+{{- end }}
+{{- if eq $name "review-service" }}
+training_service:
+  base_url: "http://training-service:{{ (index $root.Values.services "training-service" "port") }}"
+{{- end }}
+{{- end -}}
+{{- $root := . -}}
+{{- range $name := list "content-service" "user-service" "training-service" "review-service" "fault-engine" "sandbox-service" }}
+{{- $s := index $root.Values.services $name }}
+{{- if $s.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  labels:
+    {{- include "quenching.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+data:
+  config.yaml: |
+{{ include "quenching.renderConfig" (list $root $name) | indent 4 }}
+{{- end }}
+{{- end }}

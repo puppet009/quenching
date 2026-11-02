@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/macrozheng/mall-app-web",
+  "commit": "b1eb3cde1d74fbf62e72195bafd9322c8149f4c8",
+  "imported_at": "2026-10-02T09:25:09.8885004Z",
+  "method": "git archive HEAD ZIP; no nested .git; unchanged upstream files",
+  "archive_sha256": "5c1b5ac646448b1690ec64e25ca6ec5dda15a6be999f2e50ec392f90b7151c5f"
+}

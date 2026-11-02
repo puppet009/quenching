@@ -1,0 +1,24 @@
+-- Legacy fault/training migrations must finish before this ownership handoff.
+DO $$ BEGIN IF to_regclass('defects') IS NULL THEN RAISE EXCEPTION 'Run legacy fault/training migrations before content ownership migration'; END IF; END $$;
+CREATE TABLE content_defects (LIKE defects INCLUDING ALL);
+CREATE SEQUENCE content_defects_id_seq;
+ALTER TABLE content_defects ALTER COLUMN id SET DEFAULT nextval('content_defects_id_seq');
+ALTER SEQUENCE content_defects_id_seq OWNED BY content_defects.id;
+INSERT INTO content_defects SELECT * FROM defects;
+SELECT setval('content_defects_id_seq',COALESCE((SELECT max(id) FROM content_defects),1),EXISTS(SELECT 1 FROM content_defects));
+DO $$ BEGIN IF to_regclass('ai_pitfall_configs') IS NULL THEN RAISE EXCEPTION 'Run legacy fault/training migrations before content ownership migration'; END IF; END $$;
+CREATE TABLE content_ai_pitfall_configs (LIKE ai_pitfall_configs INCLUDING ALL);
+CREATE SEQUENCE content_ai_pitfall_configs_id_seq;
+ALTER TABLE content_ai_pitfall_configs ALTER COLUMN id SET DEFAULT nextval('content_ai_pitfall_configs_id_seq');
+ALTER SEQUENCE content_ai_pitfall_configs_id_seq OWNED BY content_ai_pitfall_configs.id;
+INSERT INTO content_ai_pitfall_configs SELECT * FROM ai_pitfall_configs;
+SELECT setval('content_ai_pitfall_configs_id_seq',COALESCE((SELECT max(id) FROM content_ai_pitfall_configs),1),EXISTS(SELECT 1 FROM content_ai_pitfall_configs));
+DO $$ BEGIN IF to_regclass('fault_combinations') IS NULL THEN RAISE EXCEPTION 'Run legacy fault/training migrations before content ownership migration'; END IF; END $$;
+CREATE TABLE content_fault_combinations (LIKE fault_combinations INCLUDING ALL);
+CREATE SEQUENCE content_fault_combinations_id_seq;
+ALTER TABLE content_fault_combinations ALTER COLUMN id SET DEFAULT nextval('content_fault_combinations_id_seq');
+ALTER SEQUENCE content_fault_combinations_id_seq OWNED BY content_fault_combinations.id;
+INSERT INTO content_fault_combinations SELECT * FROM fault_combinations;
+SELECT setval('content_fault_combinations_id_seq',COALESCE((SELECT max(id) FROM content_fault_combinations),1),EXISTS(SELECT 1 FROM content_fault_combinations));
+ALTER TABLE content_fault_combinations ADD CONSTRAINT content_combo_first_defect FOREIGN KEY(first_defect_id) REFERENCES content_defects(id);
+ALTER TABLE content_fault_combinations ADD CONSTRAINT content_combo_second_defect FOREIGN KEY(second_defect_id) REFERENCES content_defects(id);

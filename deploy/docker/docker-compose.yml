@@ -1,0 +1,56 @@
+# 本地开发依赖一键启动：docker compose up -d
+# 仅包含平台中间件；沙箱内项目自带的依赖由模板 Chart 编排，不在此列。
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: quenching-postgres
+    environment:
+      POSTGRES_USER: quenching
+      POSTGRES_PASSWORD: quenching
+      POSTGRES_DB: quenching
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quenching"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: quenching-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # 平台侧不部署 Elasticsearch：结构化操作写 PostgreSQL（session_operations），
+  # 应用日志走 Loki（T1-16/17）。沙箱内模板自带的 ES 等依赖由模板 Chart 在沙箱内编排，
+  # 随沙箱创建/销毁，不属于平台依赖（见 T1-12）。
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: quenching-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    container_name: quenching-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+volumes:
+  pgdata:

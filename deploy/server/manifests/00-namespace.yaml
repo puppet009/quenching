@@ -1,0 +1,9 @@
+# platform 命名空间：沙箱 NetworkPolicy 只放行带 quenching.io/role=platform
+# 标签的命名空间，故名称与标签均为硬约束（见 sandbox-service k8s_manifests.go）。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform
+  labels:
+    quenching.io/role: platform
+    app.kubernetes.io/part-of: quenching

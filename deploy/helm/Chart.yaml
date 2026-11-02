@@ -1,0 +1,13 @@
+apiVersion: v2
+name: quenching
+description: 淬火 —— AI 故障排查训练平台（MVP）。含 7 个 Go 服务 + Python ai-service。
+type: application
+version: 0.1.0-alpha.1
+appVersion: "0.1.0-alpha.1"
+
+# 单机部署（deploy/server）的中间件 PostgreSQL/RabbitMQ/Redis 由
+# manifests/10-middleware.yaml 独立部署，平台 Chart 复用集群内已有实例，
+# 故不再声明 bitnami 子 chart 依赖（helm 3.13+ 即便有 condition 也要求依赖包
+# 存在于 charts/ 目录，否则 helm install 报 dependency 缺失）。
+# 如日后需要本 Chart 自带中间件，可在此重新加回 dependencies 并执行
+# helm dependency update，同时把 values 中对应 enabled 置 true。

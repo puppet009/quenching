@@ -1,0 +1,104 @@
+server:
+  addr: ":8086"
+  mode: "debug"   # debug / release
+log:
+  level: "info"
+  dir: ""         # 落盘目录，空=仅 stdout；集群由 Helm 注入
+db:
+  # 本地开发默认连 docker-compose 的 PostgreSQL；生产用环境变量 DB_DSN 覆盖
+  dsn: "postgres://quenching:quenching@localhost:5432/quenching?sslmode=disable"
+ai:
+  # Python ai-service gRPC 地址（T1-36）。本地联调默认本机 9000。
+  addr: "127.0.0.1:9000"
+  model: "qwen3.8-flash"            # 记录到 ai_conversations.ai_model；接入真实模型时改 qwen3.8-flash 等
+  prompt_version: "training_assistant:v1"
+observability:
+  # 云原生可观测装配（T1-15/17/20/22/23/29）。客户端均为懒连接：
+  # 留空不阻断启动，仅相关接口被调用时返回查询错误 / 推送静默降级。
+  prometheus_url: "http://localhost:9090"   # 本地 docker-compose 已含 Prometheus
+  loki_url: ""                # 本地 compose 暂无 Loki；云上填 http://loki:3100
+  loki_org_id: ""             # Loki 多租户 X-Scope-OrgID 头；单租户部署留空
+  log_max_limit: 1000         # T4-16：单次日志查询返回条数硬顶
+  namespace: ""               # 沙箱指标隔离用，云上填 Kubernetes namespace
+  release_name: ""            # 沙箱 Helm release 前缀
+  ws_gateway_url: ""          # g7 起事件接口并入 api-gateway；云上填其地址（http://api-gateway:8080），启用实时事件推送
+  ws_gateway_api_key: ""      # 事件接口服务间 API Key（对应 api-gateway 的 WS_INTERNAL_API_KEY）
+
+# 实时日志流（T4-16）。
+logviewer:
+  max_streams: 20             # 单进程同时存活的实时流上限（按沙箱计）
+  min_interval_ms: 2000       # 前端轮询间隔下限（毫秒），防高频轮询打爆 Loki
+  export_limit: 5000          # 单次导出条数上限，超出时响应头 X-Log-Export-Truncated: 1
+
+# 服务间内部接口鉴权（东西向直连，不经网关）。
+# 留空则不校验内部共享头，兼容本地开发；云上与调用方 internal.token 保持一致。
+# 该 token 同时用于两类内部接口：
+#   - 复盘聚合接口：X-Internal-Token
+#   - sandbox-service 前端信号/规则注册：X-Internal-API-Key
+internal:
+  token: ""
+
+# fault-engine 运行时（T3-12 踩坑后果传导 / 会话结束撤销）。
+# 同样懒连接：base_url 留空时次生故障只登记不注入，会话结束钩子仅做本地清理。
+fault_engine:
+  base_url: ""                # 本地联调填 http://localhost:8088；云上 http://fault-engine:8088
+  default_namespace: ""       # 临时注入缺省命名空间；建议与 observability.namespace 保持一致
+  default_pod: ""             # 目标 Pod 全局兜底，通常留空（命名空间内匹配/不限制）
+
+# content-service 目录只读（第二批：项目 / 项目服务名回填与关键词反查）。
+# 懒连接：留空时仓储 nil 守卫下降级；云上填 http://content-service:8082。
+content_service:
+  base_url: ""                # 本地联调填 http://localhost:8082；云上 http://content-service:8082
+
+# sandbox-service 内部只读（Agent M3：服务拓扑 / 文件浏览 / 只读诊断命令）。
+# 懒连接：留空时 list_services/list_files/read_file/run_diagnostic 不注册；
+# 云上填 http://sandbox-service:8089。
+sandbox_service:
+  base_url: ""                # 本地联调填 http://localhost:8089
+
+# user-service 用户协作档案读写（第三批：交叉分组、协作雷达、均分、等级）。
+# 懒连接：留空时协作档案回填/回写降级，交叉分组开训会因无法分配分组而失败。
+user_service:
+  base_url: ""                # 本地联调填 http://localhost:8085；云上 http://user-service:8085
+
+# review-service 复盘协作子分读写（第四批：评分管线回写、详情/雷达/列表回填）。
+# 懒连接：留空时 reviews 回填与回写静默降级，不阻断主流程。
+review_service:
+  base_url: ""                # 本地联调填 http://localhost:8087；云上 http://review-service:8087
+
+# 训练会话卡顿检测（T3-6）。纯规则、内存态：只识别卡顿状态供查询与 T3-7 推送复用，
+# 不建表、不推送、不频控。只评估 running 会话；数据不足时保守弃权不误报。
+# 各项配 0 / 缺省时回落到代码内置默认值（见 internal/model/stall.go）。
+stall:
+  scan_interval_ms: 30000     # 后台扫描周期（毫秒），默认 30s
+  idle_timeout_ms: 300000     # R1 空闲超时：距最近有效活动超过 5 分钟判 idle
+  abandon_timeout_ms: 1200000 # R3 弃班：连续空闲超过 20 分钟，班次按未完成结束并回收沙箱
+  progress_window_ms: 600000  # R2 观察窗口：10 分钟内的活动与指标趋势
+  min_activities: 2           # R2 窗口内至少 2 次有效活动才评估"有操作无进展"
+  min_segment_points: 2       # R2 指标首/末段各至少 2 个点（窗口共至少 4 点）才比较趋势
+  min_error_rate_drop: 1.0    # R2 错误率下降 >=1 个百分点算有改善
+  min_p99_drop: 0.05          # R2 P99 延迟下降 >=0.05 秒算有改善
+  min_qps_relative_gain: 0.10 # R2 QPS 回升同时满足相对 >=10%
+  min_qps_absolute_gain: 1.0  # 与绝对 >=1.0 次/秒（低基数防过敏，缺一不可）
+
+# T3-7 主动线索推送：卡顿时向属主推送一条提问式 ai_message 并落库（不泄露根因）。
+clue:
+  enabled: true               # 总开关；关闭后不注册 OnStall 推送
+  persist_timeout_ms: 10000   # 查属主/频控/落库整体超时
+  publish_timeout_ms: 5000    # 发布 ai_message 事件到 ws-gateway 的超时
+
+# T3-24 结束评分最小闭环（runtime finish 钩子）。
+# 仅"正常完成"的会话计分：技术分本地计算先落库，协作分调 ai-service 尽力而为。
+# 下列为技术分耗时维度的难度参考时长（秒，YAML 中以字符串给出）；
+# 整段缺省或单档缺失时回落代码默认 easy=300 / normal(medium)=600 / hard=900。
+scoring:
+  expected_duration_sec:
+    easy: "300"
+    normal: "600"
+    medium: "600"
+    hard: "900"
+
+# 恢复验证：指标/健康检查器要核验的业务 Deployment 名（随沙箱模板而定）。
+# 留空时两个检查器自动弃权（空服务列表不下钻指标）；接入具体模板后按模板 services 填写。
+recovery:
+  services: []
