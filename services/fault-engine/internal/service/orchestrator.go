@@ -13,6 +13,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/quenching/fault-engine/internal/model"
@@ -60,8 +61,9 @@ type Orchestrator struct {
 	sessionID int64
 	namespace string
 
-	phase Phase
-	exp   *model.Experiment // 注入成功后保存，恢复时用其 uid
+	stateMu sync.RWMutex // 保护查询接口与驱动循环共享的阶段和实验信息。
+	phase   Phase
+	exp     *model.Experiment // 注入成功后保存，恢复时用其 uid
 }
 
 // OrchestratorConfig 构造参数。
@@ -101,10 +103,22 @@ func NewOrchestrator(cfg OrchestratorConfig) *Orchestrator {
 }
 
 // Phase 返回当前阶段。
-func (o *Orchestrator) Phase() Phase { return o.phase }
+func (o *Orchestrator) Phase() Phase {
+	o.stateMu.RLock()
+	defer o.stateMu.RUnlock()
+	return o.phase
+}
+
+func (o *Orchestrator) setPhase(phase Phase) {
+	o.stateMu.Lock()
+	o.phase = phase
+	o.stateMu.Unlock()
+}
 
 // ExperimentUID 返回已注入实验的 uid（未注入为空）。
 func (o *Orchestrator) ExperimentUID() string {
+	o.stateMu.RLock()
+	defer o.stateMu.RUnlock()
 	if o.exp != nil {
 		return o.exp.ExperimentUID
 	}
@@ -113,6 +127,7 @@ func (o *Orchestrator) ExperimentUID() string {
 
 // Step 推进一步。elapsedSeconds 为实训已进行秒数，metrics 为当前指标采样。
 // 上层每个轮询周期调用一次。返回当前阶段。
+// Step 与 Abort 由同一个驱动循环串行调用；Phase/ExperimentUID 可并发查询。
 func (o *Orchestrator) Step(ctx context.Context, elapsedSeconds int, metrics []JudgeMetricSample) (Phase, error) {
 	switch o.phase {
 	case PhaseArmed:
@@ -132,7 +147,7 @@ func (o *Orchestrator) handleArmed(ctx context.Context, elapsed int, metrics []J
 	case TriggerDecisionFire:
 		return o.inject(ctx)
 	case TriggerDecisionExpired:
-		o.phase = PhaseSkipped
+		o.setPhase(PhaseSkipped)
 		return o.phase, nil
 	default:
 		return o.phase, nil // Wait，继续等
@@ -144,13 +159,15 @@ func (o *Orchestrator) inject(ctx context.Context) (Phase, error) {
 	spec := o.buildSpec()
 	exp, err := o.inj.Inject(ctx, spec)
 	if err != nil {
-		o.phase = PhaseFailed
+		o.setPhase(PhaseFailed)
 		o.emitFailed(ctx, err)
 		return o.phase, err
 	}
+	o.stateMu.Lock()
 	o.exp = exp
-	o.trigger.MarkFired()
 	o.phase = PhaseInjected
+	o.stateMu.Unlock()
+	o.trigger.MarkFired()
 	if o.events.OnInjected != nil {
 		o.events.OnInjected(ctx, exp)
 	}
@@ -163,7 +180,7 @@ func (o *Orchestrator) handleInjected(ctx context.Context, metrics []JudgeMetric
 	if res.Verdict != JudgeVerdictResolved {
 		return o.phase, nil
 	}
-	o.phase = PhaseResolved
+	o.setPhase(PhaseResolved)
 	if o.events.OnResolved != nil {
 		o.events.OnResolved(ctx, o.sessionID)
 	}
@@ -181,7 +198,7 @@ func (o *Orchestrator) Abort(ctx context.Context) error {
 		return nil
 	}
 	if o.exp == nil {
-		o.phase = PhaseRevoked
+		o.setPhase(PhaseRevoked)
 		return nil
 	}
 	return o.revoke(ctx)
@@ -192,11 +209,11 @@ func (o *Orchestrator) revoke(ctx context.Context) error {
 		return nil
 	}
 	if err := o.inj.Revoke(ctx, o.buildSpec(), o.exp.ExperimentUID); err != nil {
-		o.phase = PhaseFailed
+		o.setPhase(PhaseFailed)
 		o.emitFailed(ctx, err)
 		return err
 	}
-	o.phase = PhaseRevoked
+	o.setPhase(PhaseRevoked)
 	if o.events.OnRevoked != nil {
 		o.events.OnRevoked(ctx, o.sessionID)
 	}

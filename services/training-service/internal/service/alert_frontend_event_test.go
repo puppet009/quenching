@@ -7,6 +7,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -32,6 +33,55 @@ func frontendRule(id string, types []string, forDuration, recovery time.Duration
 		EventTypes:     types,
 		ForDuration:    forDuration,
 		RecoveryWindow: recovery,
+	}
+}
+
+func TestManager_ReportEvent_NonpositiveDurationIgnoresTimestampSkew(t *testing.T) {
+	eventAt := time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC)
+	for _, initial := range []AlertStatus{AlertStatusOK, AlertStatusPending, AlertStatusResolved} {
+		for _, duration := range []time.Duration{0, -time.Second} {
+			t.Run(fmt.Sprintf("%s/%s", initial, duration), func(t *testing.T) {
+				mgr, pub := newFrontendManager()
+				rule := frontendRule("clock-skew", nil, duration, time.Minute)
+				mgr.AddRule(rule)
+				alert := &AlertInstance{
+					ID: generateAlertID(rule), RuleID: rule.ID, Status: initial,
+					StartedAt: eventAt.Add(time.Hour),
+				}
+				mgr.alerts[alert.ID] = alert
+				mgr.ReportEvent(context.Background(), &FrontendEvent{
+					SandboxID: "sb-1", Type: FrontendSignalPageError, EventAt: eventAt,
+				})
+				if alert.Status != AlertStatusFiring || pub.publishCount != 1 {
+					t.Fatalf("nonpositive duration must fire despite earlier event time: status=%s notifications=%d", alert.Status, pub.publishCount)
+				}
+			})
+		}
+	}
+}
+
+func TestManager_ReportEvent_PositiveDurationWaitsUntilBoundary(t *testing.T) {
+	mgr, pub := newFrontendManager()
+	rule := frontendRule("positive-duration", nil, time.Minute, 2*time.Minute)
+	mgr.AddRule(rule)
+	event := &FrontendEvent{
+		SandboxID: "sb-1", Type: FrontendSignalPageError,
+		EventAt: time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC),
+	}
+	mgr.ReportEvent(context.Background(), event)
+	alert, _ := mgr.GetAlert(generateAlertID(rule))
+	if alert.Status != AlertStatusPending || pub.publishCount != 0 {
+		t.Fatalf("positive duration must start pending: status=%s notifications=%d", alert.Status, pub.publishCount)
+	}
+	event.EventAt = alert.StartedAt.Add(rule.ForDuration - time.Nanosecond)
+	mgr.ReportEvent(context.Background(), event)
+	if alert.Status != AlertStatusPending || pub.publishCount != 0 {
+		t.Fatalf("must remain pending before duration boundary: status=%s notifications=%d", alert.Status, pub.publishCount)
+	}
+	event.EventAt = alert.StartedAt.Add(rule.ForDuration)
+	mgr.ReportEvent(context.Background(), event)
+	if alert.Status != AlertStatusFiring || pub.publishCount != 1 {
+		t.Fatalf("must fire at duration boundary: status=%s notifications=%d", alert.Status, pub.publishCount)
 	}
 }
 

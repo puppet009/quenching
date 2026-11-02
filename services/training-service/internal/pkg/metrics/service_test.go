@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -205,6 +206,7 @@ func TestPromQLBuilder_UnknownMetric(t *testing.T) {
 // ========== Mock Prometheus 客户端 ==========
 
 type fakePromClient struct {
+	mu         sync.Mutex
 	rangeData  []DataPoint
 	instantVal float64
 	// instantVals 按 PromQL 特征子串覆盖瞬时值（如 error_rate 查询）。
@@ -213,11 +215,15 @@ type fakePromClient struct {
 }
 
 func (f *fakePromClient) QueryRange(_ context.Context, query string, _, _ time.Time, _ int) ([]DataPoint, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastQuery = query
 	return f.rangeData, nil
 }
 
 func (f *fakePromClient) Query(_ context.Context, query string, _ time.Time) (float64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastQuery = query
 	for marker, v := range f.instantVals {
 		if strings.Contains(query, marker) {
@@ -225,6 +231,68 @@ func (f *fakePromClient) Query(_ context.Context, query string, _ time.Time) (fl
 		}
 	}
 	return f.instantVal, nil
+}
+
+type blockingPromClient struct {
+	fakePromClient
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *blockingPromClient) Query(ctx context.Context, query string, at time.Time) (float64, error) {
+	f.entered <- struct{}{}
+	select {
+	case <-f.release:
+		return f.fakePromClient.Query(ctx, query, at)
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
+func TestService_MetricQueriesRemainConcurrent(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		queries int
+		run     func(context.Context, *Service) error
+	}{
+		{"all metrics", 5, func(ctx context.Context, svc *Service) error {
+			_, err := svc.GetAllMetrics(ctx, "user-service")
+			return err
+		}},
+		{"service health", 3, func(ctx context.Context, svc *Service) error {
+			_, err := svc.CheckServiceHealth(ctx, "user-service")
+			return err
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			client := &blockingPromClient{
+				entered: make(chan struct{}, test.queries), release: make(chan struct{}),
+			}
+			unblock := sync.OnceFunc(func() { close(client.release) })
+			defer unblock()
+			done := make(chan error, 1)
+			go func() { done <- test.run(ctx, NewService(client, "sandbox-123", "ecom")) }()
+			for range test.queries {
+				select {
+				case <-client.entered:
+				case <-ctx.Done():
+					t.Fatal("metric queries must all start before any query completes")
+				}
+			}
+			// All queries entered concurrently; let each return through the shared fake.
+			unblock()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal("concurrent metric collection did not complete")
+			}
+		})
+	}
 }
 
 // ========== 服务层测试 ==========

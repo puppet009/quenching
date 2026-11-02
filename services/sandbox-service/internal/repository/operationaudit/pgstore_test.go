@@ -75,7 +75,7 @@ func TestPGIngestAtomicWithText(t *testing.T) {
 	e := Evidence{SchemaVersion: 1, EventID: "o:2", OperationID: "o", SessionID: 1, Sequence: 2, Actor: "student", Kind: "command", Status: "succeeded"}
 	e.Arguments = json.RawMessage(`{"z":1,"a":{"q":true,"b":2}}`)
 	e.Result = json.RawMessage(`{"result":true,"detail":{"z":1,"a":2}}`)
-	d := Delivery{e, []Text{CaptureText("o", "stdout", []byte("tail"), TextLimit)}}
+	d := Delivery{Evidence: e, Texts: []Text{CaptureText("o", "stdout", []byte("tail"), TextLimit)}}
 	if err := s.Ingest(context.Background(), d); err != nil {
 		t.Fatal(err)
 	}

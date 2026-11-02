@@ -2,6 +2,8 @@ package hub
 
 import (
 	"encoding/json"
+	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -64,10 +66,38 @@ func (m *mockConn) SetPongHandler(h func(string) error) {
 	m.pongHandler = h
 }
 
+func waitForClients(t *testing.T, h *Hub, want map[int64][]string) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		h.mu.RLock()
+		got := make(map[int64][]string, len(h.clients))
+		for userID, clients := range h.clients {
+			ids := make([]string, 0, len(clients))
+			for id := range clients {
+				ids = append(ids, id)
+			}
+			sort.Strings(ids)
+			got[userID] = ids
+		}
+		h.mu.RUnlock()
+		if reflect.DeepEqual(got, want) {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("等待连接状态 %v 超时，实际 %v", want, got)
+		case <-ticker.C:
+		}
+	}
+}
+
 func TestHubRegisterUnregister(t *testing.T) {
 	h := NewHub()
 	go h.Run()
-	time.Sleep(50 * time.Millisecond) // 等主循环启动
 
 	conn := newMockConn()
 	client := &Client{
@@ -78,31 +108,15 @@ func TestHubRegisterUnregister(t *testing.T) {
 	}
 
 	h.Register(client)
-	time.Sleep(50 * time.Millisecond)
-
-	h.mu.RLock()
-	if len(h.clients) != 1 {
-		t.Fatalf("期望 1 个用户，实际 %d", len(h.clients))
-	}
-	if len(h.clients[1001]) != 1 {
-		t.Fatalf("期望用户 1001 有 1 个连接，实际 %d", len(h.clients[1001]))
-	}
-	h.mu.RUnlock()
+	waitForClients(t, h, map[int64][]string{1001: {"test-conn-1"}})
 
 	h.Unregister(client)
-	time.Sleep(50 * time.Millisecond)
-
-	h.mu.RLock()
-	if len(h.clients) != 0 {
-		t.Fatalf("期望 0 个用户，实际 %d", len(h.clients))
-	}
-	h.mu.RUnlock()
+	waitForClients(t, h, map[int64][]string{})
 }
 
 func TestHubMultiConnectionsPerUser(t *testing.T) {
 	h := NewHub()
 	go h.Run()
-	time.Sleep(50 * time.Millisecond)
 
 	c1 := &Client{ID: "c1", UserID: 1001, Conn: newMockConn(), Send: make(chan []byte, 256)}
 	c2 := &Client{ID: "c2", UserID: 1001, Conn: newMockConn(), Send: make(chan []byte, 256)}
@@ -111,34 +125,65 @@ func TestHubMultiConnectionsPerUser(t *testing.T) {
 	h.Register(c1)
 	h.Register(c2)
 	h.Register(c3)
-	time.Sleep(50 * time.Millisecond)
-
-	h.mu.RLock()
-	if len(h.clients[1001]) != 2 {
-		t.Fatalf("用户 1001 应有 2 个连接，实际 %d", len(h.clients[1001]))
-	}
-	if len(h.clients[1002]) != 1 {
-		t.Fatalf("用户 1002 应有 1 个连接，实际 %d", len(h.clients[1002]))
-	}
-	h.mu.RUnlock()
+	waitForClients(t, h, map[int64][]string{1001: {"c1", "c2"}, 1002: {"c3"}})
 
 	h.Unregister(c1)
-	time.Sleep(50 * time.Millisecond)
+	waitForClients(t, h, map[int64][]string{1001: {"c2"}, 1002: {"c3"}})
+}
 
-	h.mu.RLock()
-	if len(h.clients[1001]) != 1 {
-		t.Fatalf("注销 c1 后用户 1001 应有 1 个连接，实际 %d", len(h.clients[1001]))
+func TestHubChannelQueriesDuringSubscriptionChanges(t *testing.T) {
+	h := NewHub()
+	client := &Client{
+		ID:            "channel-query-test",
+		UserID:        1001,
+		Send:          make(chan []byte, 1),
+		subscriptions: make(map[string]bool),
 	}
-	if _, ok := h.clients[1001]["c2"]; !ok {
-		t.Fatal("应保留 c2 连接")
+	h.addClient(client)
+
+	start := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-start
+		for i := 0; i < 1000; i++ {
+			h.subscribeChannel(client.ID, "room:test")
+			h.unsubscribeChannel(client.ID, "room:test")
+		}
+	}()
+	close(start)
+
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
+		count := h.ChannelCount("room:test")
+		if count < 0 || count > 1 {
+			t.Errorf("频道订阅数应为 0 或 1，实际 %d", count)
+		}
+		for _, channel := range h.ListChannels() {
+			if channel != "room:test" {
+				t.Errorf("出现未知频道 %q", channel)
+			}
+		}
+		select {
+		case <-done:
+			if count := h.ChannelCount("room:test"); count != 0 {
+				t.Errorf("取消全部订阅后应为 0，实际 %d", count)
+			}
+			if channels := h.ListChannels(); len(channels) != 0 {
+				t.Errorf("取消全部订阅后应没有频道，实际 %v", channels)
+			}
+			return
+		case <-deadline.C:
+			t.Fatal("订阅变更未完成")
+		default:
+		}
 	}
-	h.mu.RUnlock()
 }
 
 func TestSendToUser(t *testing.T) {
 	h := NewHub()
 	go h.Run()
-	time.Sleep(50 * time.Millisecond)
 
 	conn := newMockConn()
 	client := &Client{
@@ -149,7 +194,7 @@ func TestSendToUser(t *testing.T) {
 	}
 	h.Register(client)
 	go client.WritePump()
-	time.Sleep(50 * time.Millisecond)
+	waitForClients(t, h, map[int64][]string{1001: {"u1-c1"}})
 
 	h.SendToUser(1001, Event{
 		Type: EventScoreUpdate,
@@ -176,7 +221,6 @@ func TestSendToUser(t *testing.T) {
 func TestBroadcast(t *testing.T) {
 	h := NewHub()
 	go h.Run()
-	time.Sleep(50 * time.Millisecond)
 
 	c1 := &Client{ID: "c1", UserID: 1001, Conn: newMockConn(), Send: make(chan []byte, 256)}
 	c2 := &Client{ID: "c2", UserID: 1002, Conn: newMockConn(), Send: make(chan []byte, 256)}
@@ -185,7 +229,7 @@ func TestBroadcast(t *testing.T) {
 	h.Register(c2)
 	go c1.WritePump()
 	go c2.WritePump()
-	time.Sleep(50 * time.Millisecond)
+	waitForClients(t, h, map[int64][]string{1001: {"c1"}, 1002: {"c2"}})
 
 	h.Broadcast(Event{Type: EventAlert, Data: "test alert"})
 
@@ -208,7 +252,6 @@ func TestBroadcast(t *testing.T) {
 func TestEventHelloData(t *testing.T) {
 	h := NewHub()
 	go h.Run()
-	time.Sleep(50 * time.Millisecond)
 
 	conn := newMockConn()
 	client := &Client{

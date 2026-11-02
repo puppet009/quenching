@@ -343,14 +343,16 @@ func (m *AlertManager) ReportEvent(ctx context.Context, evt *FrontendEvent) {
 		switch alert.Status {
 		case AlertStatusOK:
 			alert.transition(eventTriggered)
-			if evt.EventAt.Sub(alert.StartedAt) >= rule.ForDuration {
+			// EventAt precedes the transition's wall-clock StartedAt for events
+			// already in transit. A disabled hold period must not compare those clocks.
+			if rule.ForDuration <= 0 || evt.EventAt.Sub(alert.StartedAt) >= rule.ForDuration {
 				alert.transition(eventForDurationMet)
 				alert.Message = formatFrontendEventMessage(rule, evt)
 				m.notifyFiring(ctx, alert)
 			}
 
 		case AlertStatusPending:
-			if evt.EventAt.Sub(alert.StartedAt) >= rule.ForDuration {
+			if rule.ForDuration <= 0 || evt.EventAt.Sub(alert.StartedAt) >= rule.ForDuration {
 				alert.transition(eventForDurationMet)
 				alert.Message = formatFrontendEventMessage(rule, evt)
 				m.notifyFiring(ctx, alert)
@@ -368,7 +370,7 @@ func (m *AlertManager) ReportEvent(ctx context.Context, evt *FrontendEvent) {
 			alert.LastNotified = time.Time{}
 			alert.TriggerCount = 0
 			alert.transition(eventTriggered)
-			if evt.EventAt.Sub(alert.StartedAt) >= rule.ForDuration {
+			if rule.ForDuration <= 0 || evt.EventAt.Sub(alert.StartedAt) >= rule.ForDuration {
 				alert.transition(eventForDurationMet)
 				alert.Message = formatFrontendEventMessage(rule, evt)
 				m.notifyFiring(ctx, alert)

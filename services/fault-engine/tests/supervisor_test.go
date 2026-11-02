@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/quenching/fault-engine/internal/model"
 	"github.com/quenching/fault-engine/internal/service"
 )
 
@@ -87,11 +88,13 @@ func TestSupervisorDrivesToResolved(t *testing.T) {
 // TestSupervisorStopAborts 外部 Stop 时若已注入必须撤销。
 func TestSupervisorStopAborts(t *testing.T) {
 	exec := &fakeExecutor{}
+	injected := make(chan struct{})
 	clock := &fakeClock{t: time.Now()}
 	scn := delayScenario(0)
 	orch := service.NewOrchestrator(service.OrchestratorConfig{
 		SessionID: 7002, Namespace: "sandbox-7002", Scenario: scn,
 		Injector: service.NewInjector(exec), StableRequired: time.Minute, Clock: clock,
+		Events: service.EventHandler{OnInjected: func(context.Context, *model.Experiment) { close(injected) }},
 	})
 	fetcher := &scriptedFetcher{frames: [][]service.JudgeMetricSample{cpuMetric(95)}}
 	sup := service.NewFaultSupervisor(service.SupervisorConfig{
@@ -102,9 +105,21 @@ func TestSupervisorStopAborts(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go sup.Run(ctx)
+	t.Cleanup(func() {
+		sup.Stop()
+		select {
+		case <-sup.Done():
+		case <-time.After(5 * time.Second):
+			t.Error("supervisor 未在停止后退出")
+		}
+	})
 
 	// 等首轮（立即）注入
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-injected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("未收到首轮注入事件")
+	}
 	if orch.Phase() != service.PhaseInjected {
 		t.Fatalf("首轮应注入，实际 %s", orch.Phase())
 	}

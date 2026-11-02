@@ -91,6 +91,7 @@ type Hub struct {
 	// 频道订阅：channel -> set of connection IDs
 	channels map[string]map[string]*Client
 
+	// 保护连接及频道映射，供主循环之外的监控读取。
 	mu sync.RWMutex
 
 	// 注册/注销通道
@@ -239,27 +240,30 @@ func (h *Hub) ListChannels() []string {
 	return channels
 }
 
-// ——— 内部方法（都在主循环 goroutine 中执行，无需加锁）———
+// ——— 内部方法（写操作由主循环串行执行，并与外部监控读取同步）———
 
 func (h *Hub) addClient(c *Client) {
+	h.mu.Lock()
 	if _, ok := h.clients[c.UserID]; !ok {
 		h.clients[c.UserID] = make(map[string]*Client)
 	}
 	h.clients[c.UserID][c.ID] = c
+	total := h.totalConns()
+	h.mu.Unlock()
 	log.Printf("[WS] 用户 %d 连接上线 (conn=%s, 当前连接数=%d)",
-		c.UserID, c.ID, h.totalConns())
+		c.UserID, c.ID, total)
 }
 
 func (h *Hub) removeClient(c *Client) {
+	removed := false
+	h.mu.Lock()
 	if userClients, ok := h.clients[c.UserID]; ok {
 		if _, exists := userClients[c.ID]; exists {
 			delete(userClients, c.ID)
-			close(c.Send)
+			removed = true
 			if len(userClients) == 0 {
 				delete(h.clients, c.UserID)
 			}
-			log.Printf("[WS] 用户 %d 连接下线 (conn=%s, 当前连接数=%d)",
-				c.UserID, c.ID, h.totalConns())
 		}
 	}
 	// 从所有频道中移除
@@ -268,6 +272,13 @@ func (h *Hub) removeClient(c *Client) {
 		if len(clients) == 0 {
 			delete(h.channels, ch)
 		}
+	}
+	total := h.totalConns()
+	h.mu.Unlock()
+	if removed {
+		close(c.Send)
+		log.Printf("[WS] 用户 %d 连接下线 (conn=%s, 当前连接数=%d)",
+			c.UserID, c.ID, total)
 	}
 }
 
@@ -303,6 +314,7 @@ func (h *Hub) sendToUserInternal(userID int64, event Event) {
 // subscribeChannel 订阅频道（内部方法，主循环中调用）。
 func (h *Hub) subscribeChannel(clientID, channel string) {
 	// 查找 client
+	h.mu.Lock()
 	var target *Client
 	for _, userClients := range h.clients {
 		if c, ok := userClients[clientID]; ok {
@@ -311,6 +323,7 @@ func (h *Hub) subscribeChannel(clientID, channel string) {
 		}
 	}
 	if target == nil {
+		h.mu.Unlock()
 		return
 	}
 
@@ -319,6 +332,8 @@ func (h *Hub) subscribeChannel(clientID, channel string) {
 		h.channels[channel] = make(map[string]*Client)
 	}
 	h.channels[channel][clientID] = target
+	count := len(h.channels[channel])
+	h.mu.Unlock()
 
 	// 更新 client 的订阅记录
 	target.mu.Lock()
@@ -326,25 +341,32 @@ func (h *Hub) subscribeChannel(clientID, channel string) {
 	target.mu.Unlock()
 
 	log.Printf("[WS] 连接 %s 订阅频道 %s (频道订阅数=%d)",
-		clientID, channel, len(h.channels[channel]))
+		clientID, channel, count)
 }
 
 // unsubscribeChannel 取消订阅频道（内部方法，主循环中调用）。
 func (h *Hub) unsubscribeChannel(clientID, channel string) {
+	var target *Client
+	count := 0
+	h.mu.Lock()
 	if clients, ok := h.channels[channel]; ok {
 		if c, exists := clients[clientID]; exists {
+			target = c
 			delete(clients, clientID)
-			// 更新 client 的订阅记录
-			c.mu.Lock()
-			delete(c.subscriptions, channel)
-			c.mu.Unlock()
-
+			count = len(clients)
 			if len(clients) == 0 {
 				delete(h.channels, channel)
 			}
-			log.Printf("[WS] 连接 %s 取消订阅频道 %s (频道订阅数=%d)",
-				clientID, channel, len(clients))
 		}
+	}
+	h.mu.Unlock()
+	if target != nil {
+		// 更新 client 的订阅记录；不同时持有 Hub 与 Client 的锁。
+		target.mu.Lock()
+		delete(target.subscriptions, channel)
+		target.mu.Unlock()
+		log.Printf("[WS] 连接 %s 取消订阅频道 %s (频道订阅数=%d)",
+			clientID, channel, count)
 	}
 }
 

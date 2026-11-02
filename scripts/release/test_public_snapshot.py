@@ -38,9 +38,13 @@ class PublicSnapshotTests(unittest.TestCase):
         self.git(self.source, "rm", "docs/internal/old.md")
         self.write("README.md", "Current public source\n")
         self.write("run.sh", "#!/bin/sh\necho ready\n")
+        # POSIX Git checks the real mode; changing only the index leaves a dirty source tree.
+        script = self.source / "run.sh"
+        script.chmod(script.stat().st_mode | 0o111)
         self.git(self.source, "add", ".")
         self.git(self.source, "update-index", "--chmod=+x", "run.sh")
         self.git(self.source, "commit", "-m", "Clean current source")
+        self.assertEqual("", self.git(self.source, "status", "--porcelain", "--untracked-files=no"))
 
     def run_process(self, arguments, cwd=None, expected=0):
         result = subprocess.run(arguments, cwd=cwd, env=self.environment,

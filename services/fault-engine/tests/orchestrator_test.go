@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,50 @@ import (
 
 // fakeClock 可控时钟。
 type fakeClock struct{ t time.Time }
+
+// 查询阶段/实验信息与驱动循环并行，事件回调也允许查询，不能持锁调用回调。
+func TestOrchestratorConcurrentSnapshots(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		var orch *service.Orchestrator
+		orch = newOrch(t, &fakeExecutor{}, delayScenario(0), time.Second, &fakeClock{t: time.Now()}, service.EventHandler{
+			OnInjected: func(context.Context, *model.Experiment) {
+				if orch.Phase() != service.PhaseInjected || orch.ExperimentUID() == "" {
+					t.Error("注入回调应可查询已提交的阶段和实验")
+				}
+			},
+			OnRevoked: func(context.Context, int64) {
+				if orch.Phase() != service.PhaseRevoked {
+					t.Error("撤销回调应可查询终态")
+				}
+			},
+		})
+		var readers sync.WaitGroup
+		ready := make(chan struct{}, 4)
+		start := make(chan struct{})
+		for j := 0; j < 4; j++ {
+			readers.Add(1)
+			go func() {
+				defer readers.Done()
+				ready <- struct{}{}
+				<-start
+				for k := 0; k < 1000; k++ {
+					_ = orch.Phase()
+					_ = orch.ExperimentUID()
+				}
+			}()
+		}
+		for j := 0; j < 4; j++ {
+			<-ready
+		}
+		close(start)
+		phase, stepErr := orch.Step(context.Background(), 0, cpuMetric(95))
+		abortErr := orch.Abort(context.Background())
+		readers.Wait()
+		if stepErr != nil || phase != service.PhaseInjected || abortErr != nil || orch.Phase() != service.PhaseRevoked {
+			t.Fatalf("生命周期异常: phase=%s step=%v abort=%v", phase, stepErr, abortErr)
+		}
+	}
+}
 
 func (c *fakeClock) Now() time.Time      { return c.t }
 func (c *fakeClock) Add(d time.Duration) { c.t = c.t.Add(d) }
