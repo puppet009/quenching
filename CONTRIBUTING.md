@@ -6,9 +6,10 @@
 
 ## 从哪里开始
 
-- **Bug**：使用 [Bug 报告模板](.github/ISSUE_TEMPLATE/bug_report.md)，写明版本、环境、复现步骤、预期与实际结果；日志和截图先脱敏。
+- **Bug**：[提交 Bug 报告](https://github.com/puppet009/quenching/issues/new?template=bug_report.md)，写明版本、环境、复现步骤、预期与实际结果；日志和截图先脱敏。
 - **文档与代码**：小改动可以直接发 PR；涉及接口、数据归属或新能力时，建议先开 Issue 说明问题、方案与影响范围，避免重复工作。
-- **真实故障案例**：使用 [故障案例模板](.github/ISSUE_TEMPLATE/fault_case.md)，或先提交一段简短经历。可以从来源、现象、环境、根因、恢复过程和证据开始；不知道的内容写“未知”，推测单独标注。维护者会一起补齐训练适配信息。
+- **真实故障案例**：[分享故障案例](https://github.com/puppet009/quenching/issues/new?template=fault_case.md)，可以先提交一段简短经历。从来源、现象、环境、根因、恢复过程和证据开始；不知道的内容写“未知”，推测单独标注。维护者会一起补齐训练适配信息。
+- **安全漏洞**：通过 [私密漏洞报告](https://github.com/puppet009/quenching/security/advisories/new) 联系维护者，详见 [安全反馈说明](SECURITY.md)。
 
 案例中请分清真实发生的事故、公开资料中已确认的问题，以及为训练进行的受控沙箱复现。注明原始来源、适用版本和条件、复现时做了哪些改编或注入；不能据此断言所选上游项目或固定版本本身存在缺陷。训练组合也应标明组合方式，不冒充真实复合事故。
 

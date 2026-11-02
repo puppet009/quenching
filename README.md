@@ -8,11 +8,22 @@
 
 本仓库是淬火平台的全部代码，采用 **Monorepo** 统一管理。
 
-当前版本为 **0.1.0-alpha.1**，正在推进真实模型接入与完整实训验证。代码实现和自动化检查不代表真实训练已经验收；模板与故障的可训练范围以对应验收结果为准。公开发布状态以 GitHub Release 为准。
+当前版本为 **[0.1.0-alpha.1](https://github.com/puppet009/quenching/releases/tag/v0.1.0-alpha.1)**，正在推进真实模型接入与完整实训验证。代码实现和自动化检查不代表真实训练已经验收；模板与故障的可训练范围以对应验收结果为准。
 
+![项目大厅：选择训练领域与真实开源项目模板](docs/assets/screenshots/project-hall.png)
+
+<details>
+<summary>查看管理后台：模板故障配置与验收状态</summary>
+
+![mall 模板故障管理：配置、启用状态与验收状态](docs/assets/screenshots/fault-management.png)
+
+</details>
+
+- [查看 Alpha Release](https://github.com/puppet009/quenching/releases/tag/v0.1.0-alpha.1)：源码、发布范围和已知限制。
+- [征集真实故障案例](https://github.com/puppet009/quenching/issues/1)：无需提交代码，也可以分享亲历或有可靠来源的真实故障，内容请先脱敏。
+- [本地开发](#十一快速开始本地开发) / [服务器部署](deploy/server/README.md)：分别用于接口联调和集群环境准备。
 - [文档导航](docs/README.md)：架构、部署、模板、故障与验收入口。
-- [版本与发布约定](docs/releases.md)：版本编号、发布检查和升级规则。
-- [更新记录](CHANGELOG.md)：未发布改动与各发布版本的变化。
+- [更新记录](CHANGELOG.md) / [版本与发布约定](docs/releases.md)：变更内容、版本编号和升级规则。
 - [参与贡献](CONTRIBUTING.md)：提交代码、改进文档或分享真实故障经验。
 
 平台原创代码与文档采用 [Apache-2.0](LICENSE) 许可证。第三方源码和素材保留各自的许可证与署名，见 [NOTICE](NOTICE) 和模板来源记录。
@@ -250,26 +261,92 @@ services/ai-service/
 
 ## 十一、快速开始（本地开发）
 
-以下步骤用于本地开发与接口联调。完整沙箱实训依赖 Kubernetes、模板镜像和模型配置，按 [服务器部署手册](deploy/server/README.md)准备。
+本节用于本地账号、项目目录及接口开发。完整沙箱实训还依赖 Kubernetes、模板镜像、故障执行器和模型配置，按 [服务器部署手册](deploy/server/README.md)与 [实训验证指南](docs/testing.md)准备；本地启动和 mock 回复不代表真实实训已经验收。
 
-**前置**：Go 1.27、Node 22.20+、pnpm 9.15.9、Python 3.12、Docker。
+### 准备工具与依赖
+
+需要 Git、Go 1.27、Node.js 22.20+、pnpm 9.15.9、Python 3.12、Docker Engine/Desktop 和 Docker Compose 插件，以及 Bash、GNU Make。下列命令使用 Linux/macOS 的 Bash 路径；Windows 可使用 WSL2，原生 Windows 的虚拟环境激活路径见 [Python venv 文档](https://docs.python.org/3.12/library/venv.html)。
+
+迁移命令还需要带 PostgreSQL 驱动的 [golang-migrate CLI](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate)。以下固定使用 `v4.19.1`；若设置了自定义 `GOBIN`，将对应目录加入 `PATH`：
 
 ```bash
-# 1. 起本地依赖（PostgreSQL/Redis/RabbitMQ/Prometheus）
-#    平台侧不部署 Elasticsearch：结构化操作写沙箱域 PG 源表，
-#    应用日志的 Loki 在 T1-16 接入；沙箱内模板自带的 ES 等依赖由模板 Chart 在沙箱内编排。
+go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
+export PATH="$(go env GOPATH)/bin:$PATH"
+migrate -version
+
+git clone https://github.com/puppet009/quenching.git
+cd quenching
+pnpm install --frozen-lockfile
+python -m venv .venv  # 确认 python --version 为 3.12
+source .venv/bin/activate
+python -m pip install -r services/ai-service/requirements.txt
+```
+
+### 启动中间件并迁移
+
+在仓库根目录准备本地配置。Go 服务读取进程环境变量及各自的 `configs/config.yaml`，不会自动加载根 `.env`；修改 `.env` 后需要在对应终端重新导出并重启进程。
+
+```bash
 cp .env.example .env
+# 根据本机端口与数据库配置修改 .env，再导出为当前终端的环境变量。
+set -a
+. ./.env
+set +a
 make deps-up
+docker compose -f deploy/docker/docker-compose.yml ps
 
-# 2. 数据库迁移（跑全部有 migrations 的服务；每个服务一张独立迁移表）
-#    使用 golang-migrate，按历史源域 → 新属主顺序串行执行
+# 确认 PostgreSQL 已健康，再执行全部服务迁移。
 make migrate
-
-# 2b. 验证：业务表 + 每个服务一张 schema_migrations_<service>
 docker exec -it quenching-postgres psql -U quenching -d quenching -c '\dt'
 ```
 
-**建表归口与外键约定（T1-34 起执行）**：
+Compose 仅启动 PostgreSQL、Redis、RabbitMQ 和 Prometheus，不启动平台服务、Loki 或沙箱内的商城依赖。自定义 `DB_DSN` 时，各 Go 服务与迁移使用同一份本地数据库配置。
+
+### 启动登录和项目目录所需进程
+
+以下进程会持续占用终端，**每行在一个新的终端中执行**。各终端先进入仓库根目录，并运行上面的 `set -a` / `. ./.env` / `set +a`，加载同一份配置。
+
+| 进程 | 在仓库根目录执行 | 作用 |
+| --- | --- | --- |
+| 用户服务 | `(cd services/user-service && go run ./cmd/server)` | `8085`：注册、登录与角色查询 |
+| 内容服务 | `TEMPLATES_ROOT="$PWD/templates" make dev-content` | `8082`：项目、模板及配置查询；显式指定模板目录 |
+| API 网关 | `(cd services/api-gateway && go run ./cmd/server)` | `8080`：前端统一入口、JWT 校验和代理 |
+| 用户端 | `make dev-web` | `5173`：用户界面 |
+| 管理后台（可选） | `make dev-admin` | `5174`：独立后台界面，需管理员角色 |
+
+两个前端的 `/api` 和 `/ws` 默认都代理到 `http://localhost:8080`。只启动内容服务不能完成默认前端的登录流程；网关与用户服务必须使用相同的 `JWT_SECRET`，未设置时二者使用相同的本地开发默认值。对外部署必须替换该值及其他开发凭据。
+
+访问用户端的登录/注册页后，再检查 `/projects` 的项目与模板请求。默认开发配置未接入真实短信服务，账号密码注册不证明手机号或邮箱归属。管理后台还会校验 `admin` 角色，本地迁移中的开发账号见 [用户种子数据](services/user-service/migrations/000006_seed_admin_and_roles.up.sql)，仅用于隔离开发环境。
+
+可以分别请求 `http://localhost:8080/health`、`http://localhost:8085/health` 和 `http://localhost:8082/health` 检查进程响应；健康接口成功不代表登录、数据或完整训练业务已经通过验证。
+
+### AI 接口联调与 mock 范围
+
+AI 服务使用前面安装的虚拟环境。在仓库根目录的新终端中执行：
+
+```bash
+source .venv/bin/activate
+set -a
+. ./.env
+set +a
+APP_ENV=development LLM_MOCK=true make dev-ai
+```
+
+`make dev-ai` 只启动 FastAPI HTTP（`8000`）。Go 服务使用 AI gRPC 时，还需在另一个终端启动 `9000`：
+
+```bash
+source .venv/bin/activate
+set -a
+. ./.env
+set +a
+(cd services/ai-service && APP_ENV=development LLM_MOCK=true python -m app.grpc_server.server)
+```
+
+HTTP 健康状态见 `http://localhost:8000/health`，其中 `llm_mock` 应为 `true`。`LLM_MOCK=true` 只替代模型调用，不会提供 Kubernetes、商城业务、指标、故障注入或数据库的模拟实现；mock 输出不用于证明真实模型或实训质量。
+
+训练、复盘、沙箱与资源管理页面还依赖对应后端和基础设施，不能仅凭上述进程判断其可用。各 Go 服务端口为：api-gateway `8080`、content-service `8082`、user-service `8085`、training-service `8086`、review-service `8087`、fault-engine `8088`、sandbox-service `8089`；需要联调时，在对应服务目录执行 `go run ./cmd/server` 并配置其依赖。
+
+### 数据库归属与外键约定
 
 - 表按数据所有权放在对应服务的 `services/<svc>/migrations/`，版本号在该服务目录内独立递增（一表一迁移，`up/down` 成对）。当前归口：
   - user-service：`users` `user_profiles` `roles` `user_roles`
@@ -281,27 +358,8 @@ docker exec -it quenching-postgres psql -U quenching -d quenching -c '\dt'
 - **同一服务内、无环引用才建物理外键**（如 `session_defects.session_id → training_sessions`）。
 - 旧 `defects`、`ai_pitfall_configs`、`fault_combinations`、`session_operations`、`operation_*` 保留用于历史迁移和备份，应用不再读写。首次安装仍需先跑历史 fault/training 迁移；不能只单独跑 content/sandbox 新属主迁移。
 - **跨服务引用一律用普通 `BIGINT` 列 + 索引，不建物理外键**：各服务迁移独立排序、共库执行，跨服务外键会造成建表顺序耦合，且 `sandboxes.session_id ↔ training_sessions.sandbox_id` 是循环引用。引用完整性由编排层保证。
-- 新表自带全库约定列 `tenant_id BIGINT NOT NULL DEFAULT 0` 与 `deleted_at TIMESTAMPTZ`（§1.1）。
-- JSONB 的 GIN 索引按文档 §13.3 只给确有筛选场景的字段建（如 `content_defects.trigger_config`），其余 MVP 不建。
-
-```bash
-# 3. 启动后端（content-service，:8082）
-make dev-content
-
-# 4. 启动 AI 服务（:8000，默认 LLM_MOCK=true，不调真实模型）
-make dev-ai
-
-# 5. 启动前端（首次先在仓库根安装 workspace 依赖）
-pnpm install
-make dev-web    # 用户端 :5173
-make dev-admin  # 管理后台 :5174（独立登录页，登录后校验管理员角色）
-```
-
-两个前端应用的 `/api` 与 `/ws` 在开发期均代理到 api-gateway `8080`。
-
-**7 个 Go 服务端口**：api-gateway `8080`、content-service `8082`、user-service `8085`、training-service `8086`、review-service `8087`、fault-engine `8088`、sandbox-service `8089`（ai-service 为 Python：HTTP `8000` / gRPC `9000`）。本地在各服务目录 `go run ./cmd/server` 分别启动；走统一入口时前端 `/api` 与 WebSocket `/ws` 代理到 api-gateway `8080`（g7 起原 ws-gateway:8090 已并入 api-gateway 同进程），单独直连 content-service 调试时代理到 `8082`。
-
-访问前端 `/projects` 可看到走通"前端 → 请求层 → content-service → PostgreSQL"的示例链路。
+- 新表自带全库约定列 `tenant_id BIGINT NOT NULL DEFAULT 0` 与 `deleted_at TIMESTAMPTZ`。
+- JSONB 的 GIN 索引只给确有筛选场景的字段建（如 `content_defects.trigger_config`）。
 
 ## 十二、如何新增一个模块（必读范式）
 

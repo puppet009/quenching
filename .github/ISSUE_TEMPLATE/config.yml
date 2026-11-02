@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞（私密报告）
+    url: https://github.com/puppet009/quenching/security/advisories/new
+    about: 请通过私密报告提供漏洞细节，勿在公开 Issue 中披露敏感信息。
